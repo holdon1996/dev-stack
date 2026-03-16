@@ -1,0 +1,94 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * { box-sizing: border-box; }
+  body { 
+    @apply bg-bg text-text;
+    font-family: 'Syne', sans-serif; 
+    margin: 0; padding: 0; overflow: hidden; height: 100vh; 
+  }
+
+  ::-webkit-scrollbar { width: 4px; }
+  ::-webkit-scrollbar-track { @apply bg-surface; }
+  ::-webkit-scrollbar-thumb { @apply bg-border rounded-sm; }
+}
+
+@layer components {
+  .status-dot { @apply w-2 h-2 rounded-full inline-block; }
+  .dot-running { @apply bg-accent; box-shadow: 0 0 8px rgba(0,229,160,0.6); animation: pulse 2s infinite; }
+  .dot-stopped { @apply bg-muted; }
+  .dot-warn { @apply bg-warn; box-shadow: 0 0 8px rgba(245,166,35,0.5); }
+
+  @keyframes pulse { 0%, 100% { opacity:1; } 50% { opacity:0.4; } }
+
+  .btn-primary {
+    @apply bg-accent text-bg font-display font-bold rounded-md px-4 py-1.5 text-[13px] border-none cursor-pointer transition-all duration-150 tracking-wide;
+  }
+  .btn-primary:hover { @apply bg-[#00ffb3] -translate-y-[1px]; }
+  .btn-primary:active { @apply translate-y-0; }
+
+  .btn-ghost {
+    @apply bg-transparent text-textDim font-display text-[13px] border border-border rounded-md px-3.5 py-1 cursor-pointer transition-all duration-150;
+  }
+  .btn-ghost:hover { @apply bg-panel text-text border-[#3d4049]; }
+
+  .btn-danger {
+    @apply bg-transparent text-danger font-display text-[13px] border border-[#ff4d6d33] rounded-md px-3.5 py-1 cursor-pointer transition-all duration-150;
+  }
+  .btn-danger:hover { @apply bg-[#ff4d6d15] border-[#ff4d6d66]; }
+
+  .nav-item {
+    @apply flex items-center gap-2.5 px-3.5 py-2 rounded-lg cursor-pointer text-[13px] font-semibold text-textDim transition-all duration-150 tracking-wide;
+  }
+  .nav-item:hover { @apply bg-panel text-text; }
+  .nav-item.active { @apply bg-panel text-accent; }
+  .nav-item.active svg { stroke: #00e5a0; }
+
+  .service-row {
+    @apply flex items-center px-[18px] py-3.5 border-b border-panel gap-3.5 transition-colors duration-100 cursor-default;
+  }
+  .service-row:hover { @apply bg-[#1a1c22]; }
+  .service-row:last-child { border-bottom: none; }
+
+  .tag {
+    @apply inline-flex items-center px-2 py-0.5 rounded text-[11px] font-mono font-medium;
+  }
+  .tag-version { @apply bg-border text-textDim; }
+  .tag-port { @apply bg-[#1a2a3a] text-info; }
+
+  .log-line { @apply font-mono text-[12px] leading-relaxed; }
+  .log-ok { @apply text-accent; }
+  .log-warn { @apply text-warn; }
+  .log-err { @apply text-danger; }
+  .log-info { @apply text-info; }
+  .log-dim { @apply text-muted; }
+
+  .titlebar { -webkit-app-region: drag; @apply h-10 bg-bg flex items-center border-b border-[#1a1c22]; }
+  .titlebar-btn { -webkit-app-region: no-drag; }
+
+  .metric-card { @apply bg-panel border border-border rounded-xl p-4; }
+  .bar-bg { @apply bg-border rounded h-1.5 overflow-hidden; }
+  .bar-fill { @apply h-full rounded transition-all duration-500 ease-out; }
+
+  .tab { @apply px-4 py-2 text-[13px] font-semibold cursor-pointer text-muted border-b-2 border-transparent transition-all duration-150 tracking-wide; }
+  .tab.active { @apply text-accent border-accent; }
+  .tab:hover:not(.active) { @apply text-text; }
+
+  .modal-overlay { @apply fixed inset-0 flex items-center justify-center z-[100] bg-black/70 backdrop-blur-sm; }
+  .modal { @apply bg-surface border border-border rounded-2xl w-[460px] p-7; }
+
+  .input-field { @apply bg-bg border border-border rounded-lg px-3.5 py-2 text-text font-mono text-[13px] w-full outline-none transition-colors duration-150; }
+  .input-field:focus { @apply border-accent; }
+
+  .select-field { @apply bg-bg border border-border rounded-lg px-3.5 py-2 text-text font-display text-[13px] w-full outline-none cursor-pointer; }
+  .select-field:focus { @apply border-accent; }
+
+  @keyframes fadeIn { from { opacity:0; transform: translateY(8px); } to { opacity:1; transform: translateY(0); } }
+  .animate-in { animation: fadeIn 0.2s ease forwards; }
+
+  .shine { @apply relative overflow-hidden; }
+  .shine::after { content:''; position:absolute; top:0; left:-100%; width:60%; height:100%; background: linear-gradient(90deg, transparent, rgba(255,255,255,0.04), transparent); animation: shine 3s ease infinite; }
+  @keyframes shine { 0% { left:-100%; } 60%,100% { left:150%; } }
+}

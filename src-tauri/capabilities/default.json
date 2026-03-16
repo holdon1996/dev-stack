@@ -1,0 +1,43 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Capability for the main window",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "opener:default",
+    {
+      "identifier": "shell:allow-execute",
+      "allow": [
+        { "name": "php", "cmd": "php", "args": true },
+        { "name": "cloudflared", "cmd": "cloudflared", "args": true },
+        { "name": "ngrok", "cmd": "ngrok", "args": true },
+        { "name": "nport", "cmd": "nport", "args": true },
+        { "name": "cmd", "cmd": "cmd", "args": true },
+        { "name": "powershell", "cmd": "powershell", "args": true },
+        { "name": "mysql", "cmd": "mysql", "args": true }
+      ]
+    },
+    {
+      "identifier": "shell:allow-spawn",
+      "allow": [
+        { "name": "php", "cmd": "php", "args": true },
+        { "name": "cloudflared", "cmd": "cloudflared", "args": true },
+        { "name": "ngrok", "cmd": "ngrok", "args": true },
+        { "name": "nport", "cmd": "nport", "args": true },
+        { "name": "cmd", "cmd": "cmd", "args": true },
+        { "name": "powershell", "cmd": "powershell", "args": true },
+        { "name": "mysql", "cmd": "mysql", "args": true }
+      ]
+    },
+    "shell:allow-open",
+    "shell:allow-stdin-write",
+    "shell:allow-kill",
+    "fs:default",
+    "os:default",
+    "process:default",
+    "dialog:default",
+    "notification:default",
+    "autostart:default"
+  ]
+}
