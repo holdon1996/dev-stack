@@ -4,6 +4,7 @@ import {
   Check, Download, Loader, Server, RefreshCw,
   Trash2, Globe, FileCode, Play, Square, RotateCcw
 } from 'lucide-react';
+import { ask } from '@tauri-apps/plugin-dialog';
 
 const PageApache = () => {
   const {
@@ -13,6 +14,7 @@ const PageApache = () => {
     setActiveApache, restartApache,
     settings, showToast, t,
     phpVersions, selectedPhpVersion,
+    openConfigFile
   } = useStore();
 
   const logEndRef = React.useRef(null);
@@ -30,15 +32,18 @@ const PageApache = () => {
   const activePhp = phpVersions.find(p => p.active && !p.isSystem && p.installed);
   const isDownloading = apacheVersions.some(v => v.installing);
 
+  const apacheService = useStore(s => s.services.find(svc => svc.type === 'web'));
+  const isApacheRunning = apacheService?.status === 'running';
+
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
 
       {/* Header */}
       <div className="px-6 py-5 border-b border-[#1a1c22] bg-bg flex items-center justify-between">
         <div className="flex-1">
-          <h1 className="text-[18px] font-extrabold tracking-tight m-0 text-text">Apache Server</h1>
+          <h1 className="text-[18px] font-extrabold tracking-tight m-0 text-text">{t('apacheTitle')}</h1>
           <p className="text-[12px] text-muted m-0 mt-1 font-mono">
-            Manage Apache HTTP Server versions and configurations
+            {t('apacheDesc')}
           </p>
         </div>
 
@@ -46,9 +51,11 @@ const PageApache = () => {
         <div className="flex items-center gap-3">
           {activeApache && (
             <div className="flex items-center gap-2 bg-surface border border-border rounded-lg px-3 py-2">
-              <div className="w-2 h-2 rounded-full bg-accent animate-pulse" />
+              <div className={`w-2 h-2 rounded-full ${isApacheRunning ? 'bg-accent animate-pulse' : 'bg-muted'}`} />
               <div className="flex flex-col">
-                <span className="text-[10px] text-muted font-bold tracking-wider uppercase">Active</span>
+                <span className="text-[10px] text-muted font-bold tracking-wider uppercase">
+                  {isApacheRunning ? t('runningState') : t('activeState')}
+                </span>
                 <span className="text-[13px] font-bold font-mono text-accent">
                   Apache {activeApache.version}
                 </span>
@@ -58,7 +65,7 @@ const PageApache = () => {
           {activePhp && (
             <div className="flex items-center gap-2 bg-surface border border-border rounded-lg px-3 py-2">
               <div className="flex flex-col">
-                <span className="text-[10px] text-muted font-bold tracking-wider uppercase">PHP Module</span>
+                <span className="text-[10px] text-muted font-bold tracking-wider uppercase">{t('phpModule')}</span>
                 <span className="text-[13px] font-bold font-mono text-info">
                   PHP {activePhp.version}
                 </span>
@@ -74,11 +81,11 @@ const PageApache = () => {
         <div>
           <div className="flex items-center justify-between mb-3">
             <div>
-              <div className="text-[11px] font-bold text-muted tracking-[0.08em] uppercase">Apache Versions</div>
+              <div className="text-[11px] font-bold text-muted tracking-[0.08em] uppercase">{t('apacheVersionsTitle')}</div>
               <div
                 className="text-[10px] text-muted font-mono mt-0.5 cursor-pointer hover:text-accent transition-colors flex items-center gap-1"
                 onClick={() => useStore.getState().openExplorer(`${settings.devStackDir}/bin/apache/`)}
-                title="Open in Explorer"
+                title={t('openInExplorer')}
               >
                 📁 {settings.devStackDir}/bin/apache/
               </div>
@@ -88,16 +95,16 @@ const PageApache = () => {
                 <button
                   className="btn-ghost text-[11px] flex items-center gap-1.5 text-accent"
                   onClick={() => restartApache()}
-                  title="Restart Apache"
+                  title={t('restart')}
                 >
-                  <RotateCcw size={11} /> Restart
+                  <RotateCcw size={11} /> {t('restart')}
                 </button>
               )}
               <button
                 className="btn-ghost text-[11px] flex items-center gap-1.5"
-                onClick={() => { detectApacheVersion(); scanInstalledApache(); fetchApacheVersions(); }}
+                onClick={async () => { await Promise.all([detectApacheVersion(), scanInstalledApache(), fetchApacheVersions()]); showToast(t('apacheListRefreshed'), 'ok'); }}
               >
-                <RefreshCw size={11} /> Refresh
+                <RefreshCw size={11} /> {t('refresh')}
               </button>
             </div>
           </div>
@@ -118,18 +125,19 @@ const PageApache = () => {
                 <div className="flex items-start justify-between mb-3 mt-0.5">
                   <div>
                     <div className="text-[16px] font-bold font-mono">Apache {v.version}</div>
-                    <div className="text-[10px] text-muted font-mono mt-0.5 uppercase tracking-wider">
-                      Windows x64 / {parseInt(v.version.split('.')[2]) >= 65 ? 'VS18' : 'VS17'}
+                    <div className="text-[10px] text-muted font-mono mt-0.5 uppercase tracking-wider flex items-center gap-1.5">
+                      Windows x64 / {v.vsRuntime || (parseInt(v.version.split('.')[2]) >= 65 ? 'VS18' : 'VS17')}
+                      {v.label && <span className="text-[9px] bg-accent/10 text-accent px-1.5 py-0.5 rounded border border-accent/20 normal-case tracking-normal font-sans font-bold">{v.label}</span>}
                     </div>
                   </div>
                   {v.installed ? (
                     <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${v.active ? 'bg-accent/15 text-accent' : 'bg-border text-textDim'
                       }`}>
-                      {v.active ? '● Active' : 'Installed'}
+                      {v.active ? `● ${t('activeState')}` : t('installedState')}
                     </span>
                   ) : (
                     <span className="text-[10px] text-muted font-bold opacity-50 tracking-widest uppercase">
-                      Available
+                      {t('availableState')}
                     </span>
                   )}
                 </div>
@@ -151,37 +159,43 @@ const PageApache = () => {
                           />
                           <span className="relative z-10 flex items-center gap-2 font-bold">
                             <Loader size={12} className="animate-spin" />
-                            {v.progress ? `${v.progress}%` : 'Starting...'}
+                            {v.progress ? `${v.progress}%` : t('starting')}
                           </span>
                         </>
                       ) : (
-                        <><Download size={13} /> Download & Install</>
+                        <><Download size={13} /> {t('downloadAndInstall')}</>
                       )}
                     </button>
                   ) : (
                     <>
                       <button
                         disabled={v.active}
-                        className={`flex-1 text-[11px] font-bold py-1.5 rounded-lg transition-all active:scale-95
+                        className={`flex-1 text-[11px] font-bold py-1.5 rounded-lg transition-all active:scale-95 border
                           ${v.active
-                            ? 'bg-accent/10 text-accent border border-accent/20 cursor-default'
-                            : 'bg-accent text-white hover:bg-accent-light shadow-lg shadow-accent/20'
+                            ? 'bg-accent/5 text-accent border-accent/30 cursor-default'
+                            : 'bg-transparent text-textDim border-border hover:border-accent hover:text-accent hover:bg-accent/5'
                           }
                         `}
                         onClick={() => setActiveApache(v.version)}
                       >
                         {v.active ? (
                           <span className="flex items-center justify-center gap-1.5">
-                            <Check size={12} /> Active
+                            <Check size={12} /> {t('inUse')}
                           </span>
-                        ) : 'Set Active'}
+                        ) : t('activate')}
                       </button>
                       {!v.active && (
                         <button
                           className="btn-ghost px-2.5 text-red-400 hover:text-red-500 hover:bg-red-500/10 opacity-0 group-hover:opacity-100 transition-opacity"
-                          title="Uninstall"
-                          onClick={() => {
-                            if (confirm(`Uninstall Apache ${v.version}?`)) uninstallApacheVersion(v.version);
+                          title={t('uninstallTooltip')}
+                          onClick={async () => {
+                            const confirmed = await ask(t('uninstallApacheConfirm', { version: v.version }), {
+                              title: 'DevStack',
+                              kind: 'warning',
+                              okLabel: t('uninstallLabel'),
+                              cancelLabel: t('cancel')
+                            });
+                            if (confirmed) uninstallApacheVersion(v.version);
                           }}
                         >
                           <Trash2 size={14} />
@@ -205,14 +219,14 @@ const PageApache = () => {
                     <div className="w-2.5 h-2.5 rounded-full bg-[#28c840]" />
                   </div>
                   <span className="text-[10px] font-bold text-muted uppercase tracking-wider ml-1">
-                    Installation Output
+                    {t('installationOutput')}
                   </span>
                 </div>
                 <button
                   className="text-[10px] text-muted hover:text-textDim uppercase font-bold"
                   onClick={() => useStore.setState({ apacheInstallLogs: [] })}
                 >
-                  Clear Log
+                  {t('clearLog')}
                 </button>
               </div>
 
@@ -224,8 +238,8 @@ const PageApache = () => {
                 return (
                   <div className="px-4 py-3 border-b border-border bg-[#0d0f14]">
                     <div className="flex justify-between text-[11px] font-mono mb-1.5">
-                      <span className="text-accent font-bold">Downloading...</span>
-                      <span className="text-muted">{downloaded} MB / {total} MB</span>
+                      <span className="text-accent font-bold">{t('downloading')}</span>
+                      <span className="text-muted">{t('mbTotal', { downloaded, total })}</span>
                     </div>
                     <div className="h-1.5 bg-border rounded-full overflow-hidden">
                       <div
@@ -243,8 +257,8 @@ const PageApache = () => {
                   <div key={i} className="flex gap-3 mb-1">
                     <span className="text-muted/50 select-none whitespace-nowrap">[{log.t}]</span>
                     <span className={`break-all ${log.l === 'ok' ? 'text-accent' :
-                        log.l === 'err' ? 'text-danger' :
-                          log.l === 'warn' ? 'text-warn' : 'text-textDim'
+                      log.l === 'err' ? 'text-danger' :
+                        log.l === 'warn' ? 'text-warn' : 'text-textDim'
                       }`}>
                       {log.m}
                     </span>
@@ -260,11 +274,11 @@ const PageApache = () => {
         {activeApache && (
           <div className="bg-surface border border-border rounded-xl p-4">
             <div className="text-[11px] font-bold text-muted uppercase tracking-wider mb-3">
-              Active Configuration
+              {t('activeConfig')}
             </div>
             <div className="grid grid-cols-2 gap-3 text-[12px]">
               <div className="flex flex-col gap-1">
-                <span className="text-muted text-[10px] uppercase font-bold">Document Root</span>
+                <span className="text-muted text-[10px] uppercase font-bold">{t('documentRoot')}</span>
                 <span
                   className="font-mono text-accent cursor-pointer hover:underline"
                   onClick={() => useStore.getState().openExplorer(settings.rootPath)}
@@ -273,24 +287,22 @@ const PageApache = () => {
                 </span>
               </div>
               <div className="flex flex-col gap-1">
-                <span className="text-muted text-[10px] uppercase font-bold">Config File</span>
+                <span className="text-muted text-[10px] uppercase font-bold">{t('configFile')}</span>
                 <span
                   className="font-mono text-textDim cursor-pointer hover:text-accent transition-colors"
-                  onClick={() => useStore.getState().openExplorer(
-                    `${settings.devStackDir}/bin/apache/apache-${activeApache.version}/conf`
-                  )}
+                  onClick={() => openConfigFile('httpd_conf')}
                 >
                   {settings.devStackDir}/bin/apache/apache-{activeApache.version}/conf/httpd.conf
                 </span>
               </div>
               <div className="flex flex-col gap-1">
-                <span className="text-muted text-[10px] uppercase font-bold">PHP Module</span>
+                <span className="text-muted text-[10px] uppercase font-bold">{t('phpModule')}</span>
                 <span className="font-mono text-info">
-                  {activePhp ? `php${activePhp.version.split('.')[0]}apache2_4.dll` : 'Not configured'}
+                  {activePhp ? `php${activePhp.version.split('.')[0]}apache2_4.dll` : t('notConfigured')}
                 </span>
               </div>
               <div className="flex flex-col gap-1">
-                <span className="text-muted text-[10px] uppercase font-bold">Port</span>
+                <span className="text-muted text-[10px] uppercase font-bold">{t('port')}</span>
                 <span className="font-mono text-textDim">80</span>
               </div>
             </div>
@@ -304,16 +316,16 @@ const PageApache = () => {
               <div className="w-8 h-8 rounded-lg bg-info/10 flex items-center justify-center text-info">
                 <Globe size={18} />
               </div>
-              <div className="text-[13px] font-bold uppercase tracking-wider">Public Access</div>
+              <div className="text-[13px] font-bold uppercase tracking-wider">{t('publicAccess')}</div>
             </div>
             <p className="text-[12px] text-muted mb-4">
-              Expose local projects via Cloudflare Tunnel or Ngrok.
+              {t('publicAccessDesc')}
             </p>
             <button
               className="btn-ghost w-full py-2 text-[12px]"
               onClick={() => useStore.setState({ activePage: 'tunnels' })}
             >
-              Open Tunnels Page
+              {t('openTunnelsPage')}
             </button>
           </div>
 
@@ -322,16 +334,16 @@ const PageApache = () => {
               <div className="w-8 h-8 rounded-lg bg-accent/10 flex items-center justify-center text-accent">
                 <FileCode size={18} />
               </div>
-              <div className="text-[13px] font-bold uppercase tracking-wider">Virtual Hosts</div>
+              <div className="text-[13px] font-bold uppercase tracking-wider">{t('vhostsTitle')}</div>
             </div>
             <p className="text-[12px] text-muted mb-4">
-              Auto-create <code className="text-accent">.test</code> domains for each project in www/.
+              {t('virtualHostsDesc')}
             </p>
             <button
               className="btn-ghost w-full py-2 text-[12px]"
               onClick={() => useStore.setState({ activePage: 'sites' })}
             >
-              Manage Local Domains
+              {t('manageLocalDomains')}
             </button>
           </div>
         </div>
