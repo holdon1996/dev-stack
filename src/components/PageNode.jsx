@@ -134,6 +134,7 @@ const PageNode = () => {
             <div className="grid grid-cols-3 gap-3">
               {nodeVersions.map((node) => {
                 const isActive = !!node.active;
+                const isInstalled = !!node.installed;
                 const isInstalling = !!node.installing;
                 const isActivating = activatingNode === node.version;
 
@@ -149,7 +150,7 @@ const PageNode = () => {
                       <div className="flex flex-col">
                         <div className="text-[16px] font-bold font-mono tracking-tight">Node {node.version}</div>
                         <div className="text-[10px] text-muted font-mono mt-0.5 uppercase tracking-wider">
-                          {isActive ? t('nodeCurrentAlias') : t('available')}
+                          {isActive ? t('nodeCurrentAlias') : isInstalling ? t('downloading') : isInstalled ? t('installed') : t('available')}
                         </div>
                       </div>
 
@@ -157,9 +158,17 @@ const PageNode = () => {
                         <div className="tag tag-active flex items-center gap-1.5 px-2 py-1 pulse">
                           {t('active')}
                         </div>
-                      ) : (
+                      ) : isInstalling ? (
+                        <div className="tag tag-version px-2 py-0.5 text-[10px] uppercase font-bold">
+                          {t('downloading')}
+                        </div>
+                      ) : isInstalled ? (
                         <div className="tag tag-version px-2 py-0.5 text-[10px] uppercase font-bold">
                           {t('installed')}
+                        </div>
+                      ) : (
+                        <div className="tag tag-version px-2 py-0.5 text-[10px] uppercase font-bold">
+                          {t('available')}
                         </div>
                       )}
                     </div>
@@ -170,12 +179,14 @@ const PageNode = () => {
 
                     <div className="flex gap-2 mt-4 pt-3 border-t border-border/50">
                       <button
-                        disabled={isActive || isActivating || isInstalling}
+                        disabled={isActive || isActivating || isInstalling || !isInstalled}
                         className={`flex-1 text-[11px] font-bold py-1.5 rounded-lg transition-all active:scale-95 border
                           ${isActive
                             ? 'bg-accent/5 text-accent border-accent/30 cursor-default'
                             : isActivating
                               ? 'bg-amber-500/10 text-amber-400 border-amber-500/30 cursor-wait'
+                              : !isInstalled
+                                ? 'bg-transparent text-muted border-border/50 cursor-not-allowed opacity-60'
                               : 'bg-transparent text-textDim border-border hover:border-accent hover:text-accent hover:bg-accent/5'
                           }
                         `}
@@ -186,7 +197,7 @@ const PageNode = () => {
 
                       <button
                         className={`btn-ghost px-2.5 text-red-400 hover:text-red-500 hover:bg-red-500/10 transition-all
-                          ${isActive ? 'opacity-60 hover:opacity-100' : 'opacity-0 group-hover:opacity-100'}
+                          ${isInstalled ? (isActive ? 'opacity-60 hover:opacity-100' : 'opacity-0 group-hover:opacity-100') : 'opacity-0 pointer-events-none'}
                         `}
                         title={t('uninstall')}
                         onClick={async () => {

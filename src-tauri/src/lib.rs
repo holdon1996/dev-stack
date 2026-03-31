@@ -1147,30 +1147,135 @@ fn node_current_dir(base_dir: &str) -> std::path::PathBuf {
     node_root_dir(base_dir).join("current")
 }
 
-fn detect_active_node_version_internal(base_dir: &str) -> Result<Option<String>, String> {
-    let current_exe = node_current_dir(base_dir).join("node.exe");
-    if !current_exe.exists() {
-        return Ok(None);
-    }
+#[cfg(target_os = "windows")]
+fn node_search_paths_from_path(path_value: &str) -> Vec<String> {
+    path_value
+        .split(';')
+        .map(|part| part.trim())
+        .filter(|part| !part.is_empty())
+        .map(|part| part.trim_end_matches('\\').replace("/", "\\"))
+        .filter_map(|dir| {
+            let candidate = Path::new(&dir).join("node.exe");
+            if candidate.exists() {
+                Some(candidate.to_string_lossy().replace("/", "\\"))
+            } else {
+                None
+            }
+        })
+        .collect()
+}
 
-    let output = std::process::Command::new(&current_exe)
-        .arg("-v")
+#[cfg(target_os = "windows")]
+fn read_user_path_value() -> Result<String, String> {
+    use winreg::RegKey;
+    use winreg::enums::HKEY_CURRENT_USER;
+
+    let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+    let env = hkcu
+        .open_subkey("Environment")
+        .map_err(|e| format!("Failed to open HKCU\\Environment: {}", e))?;
+
+    match env.get_value::<String, _>("Path") {
+        Ok(path) => Ok(path),
+        Err(_) => Ok(String::new()),
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn write_user_path_value(path_value: &str) -> Result<(), String> {
+    use winreg::RegKey;
+    use winreg::enums::HKEY_CURRENT_USER;
+
+    let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+    let (env, _) = hkcu
+        .create_subkey("Environment")
+        .map_err(|e| format!("Failed to open HKCU\\Environment for writing: {}", e))?;
+    env.set_value("Path", &path_value)
+        .map_err(|e| format!("Failed to write User PATH: {}", e))
+}
+
+#[cfg(target_os = "windows")]
+fn create_junction(link: &Path, target: &Path) -> Result<(), String> {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x08000000;
+
+    let link_str = link.to_string_lossy().replace("/", "\\");
+    let target_str = target.to_string_lossy().replace("/", "\\");
+    let output = Command::new("cmd")
+        .args(["/C", "mklink", "/J", &link_str, &target_str])
+        .creation_flags(CREATE_NO_WINDOW)
         .output()
-        .map_err(|e| format!("Failed to query active Node version: {}", e))?;
+        .map_err(|e| format!("Failed to create Node junction: {}", e))?;
 
-    if !output.status.success() {
+    if output.status.success() {
+        Ok(())
+    } else {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        Err(if stderr.is_empty() {
+            "Failed to create Node junction".into()
+        } else {
+            stderr
+        })
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn remove_junction(link: &Path) -> Result<(), String> {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x08000000;
+
+    if !link.exists() {
+        return Ok(());
+    }
+
+    let link_str = link.to_string_lossy().replace("/", "\\");
+    let output = Command::new("cmd")
+        .args(["/C", "rmdir", &link_str])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output()
+        .map_err(|e| format!("Failed to remove Node junction: {}", e))?;
+
+    if output.status.success() {
+        Ok(())
+    } else {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        Err(if stderr.is_empty() {
+            "Failed to remove Node junction".into()
+        } else {
+            stderr
+        })
+    }
+}
+
+fn detect_active_node_version_internal(base_dir: &str) -> Result<Option<String>, String> {
+    let current_dir = node_current_dir(base_dir);
+    if !current_dir.exists() {
         return Ok(None);
     }
 
-    let version = String::from_utf8_lossy(&output.stdout)
-        .trim()
-        .trim_start_matches('v')
-        .to_string();
+    #[cfg(target_os = "windows")]
+    {
+        let target = fs::canonicalize(&current_dir)
+            .map_err(|e| format!("Failed to resolve active Node version: {}", e))?
+            .to_string_lossy()
+            .replace("/", "\\");
 
-    if version.is_empty() {
+        let folder_name = Path::new(&target)
+            .file_name()
+            .map(|value| value.to_string_lossy().to_string())
+            .unwrap_or_default();
+
+        if let Some(version) = folder_name.strip_prefix("node-v") {
+            if !version.is_empty() {
+                return Ok(Some(version.to_string()));
+            }
+        }
+
         Ok(None)
-    } else {
-        Ok(Some(version))
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        Ok(None)
     }
 }
 
@@ -1218,48 +1323,20 @@ fn list_node_versions(base_dir: String) -> Result<Vec<NodeVersionState>, String>
 fn activate_node_version(base_dir: String, version: String) -> Result<String, String> {
     #[cfg(target_os = "windows")]
     {
-    let normalized = normalize_node_version_tag(&version)?;
-    let root = node_root_dir(&base_dir);
-    fs::create_dir_all(&root).map_err(|e| e.to_string())?;
+        let normalized = normalize_node_version_tag(&version)?;
+        let root = node_root_dir(&base_dir);
+        fs::create_dir_all(&root).map_err(|e| e.to_string())?;
 
-    let target_dir = node_version_dir(&base_dir, &normalized);
-    if !target_dir.join("node.exe").exists() {
-        return Err(format!("Node {} is not installed", normalized));
-    }
+        let target_dir = node_version_dir(&base_dir, &normalized);
+        if !target_dir.join("node.exe").exists() {
+            return Err(format!("Node {} is not installed", normalized));
+        }
 
-    let current_dir = node_current_dir(&base_dir);
-    let script = format!(
-        r#"
-$current = '{current}'
-$target = '{target}'
+        let current_dir = node_current_dir(&base_dir);
+        remove_junction(&current_dir)?;
+        create_junction(&current_dir, &target_dir)?;
 
-if (Test-Path -LiteralPath $current) {{
-    $item = Get-Item -LiteralPath $current -Force
-    if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {{
-        cmd /c rmdir "$current" | Out-Null
-    }} else {{
-        Remove-Item -LiteralPath $current -Force -Recurse
-    }}
-}}
-
-New-Item -ItemType Junction -Path $current -Target $target | Out-Null
-Write-Output $current
-"#,
-        current = current_dir.to_string_lossy().replace('\'', "''"),
-        target = target_dir.to_string_lossy().replace('\'', "''"),
-    );
-
-    let output = run_hidden_powershell(&script)?;
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        return Err(if stderr.is_empty() {
-            format!("Failed to activate Node {}", normalized)
-        } else {
-            stderr
-        });
-    }
-
-    Ok(current_dir.to_string_lossy().replace("\\", "/"))
+        Ok(current_dir.to_string_lossy().replace("\\", "/"))
     }
     #[cfg(not(target_os = "windows"))]
     {
@@ -1274,37 +1351,7 @@ fn deactivate_node_version(base_dir: String) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
         let current_dir = node_current_dir(&base_dir);
-        if !current_dir.exists() {
-            return Ok(());
-        }
-
-        let script = format!(
-            r#"
-$current = '{current}'
-
-if (Test-Path -LiteralPath $current) {{
-    $item = Get-Item -LiteralPath $current -Force
-    if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {{
-        cmd /c rmdir "$current" | Out-Null
-    }} else {{
-        Remove-Item -LiteralPath $current -Force -Recurse
-    }}
-}}
-"#,
-            current = current_dir.to_string_lossy().replace('\'', "''"),
-        );
-
-        let output = run_hidden_powershell(&script)?;
-        if output.status.success() {
-            Ok(())
-        } else {
-            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-            Err(if stderr.is_empty() {
-                "Failed to deactivate current Node version".into()
-            } else {
-                stderr
-            })
-        }
+        remove_junction(&current_dir)
     }
     #[cfg(not(target_os = "windows"))]
     {
@@ -1330,25 +1377,8 @@ fn get_node_path_status(base_dir: String) -> Result<NodePathStatus, String> {
             .replace("/", "\\")
             .trim_end_matches('\\')
             .to_string();
-
-        let output = run_hidden_powershell(
-            r#"
-$cmd = Get-Command node -All -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source -Unique
-if ($cmd) {
-    $cmd | ForEach-Object { Write-Output $_ }
-}
-"#,
-        )?;
-
-        if !output.status.success() {
-            return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
-        }
-
-        let paths = String::from_utf8_lossy(&output.stdout)
-            .lines()
-            .map(|line| line.trim().replace("/", "\\"))
-            .filter(|line| !line.is_empty())
-            .collect::<Vec<_>>();
+        let process_path = std::env::var("PATH").unwrap_or_default();
+        let paths = node_search_paths_from_path(&process_path);
 
         let current_node_path = paths.first().cloned();
         let devstack_prefix = format!("{}\\node.exe", devstack_current);
@@ -1357,7 +1387,7 @@ if ($cmd) {
             .map(|path| path.eq_ignore_ascii_case(&devstack_prefix))
             .unwrap_or(false);
 
-        let user_path = std::env::var("PATH").unwrap_or_default();
+        let user_path = read_user_path_value()?;
         let user_path_contains_devstack = user_path
             .split(';')
             .map(|part| part.trim().replace("/", "\\").trim_end_matches('\\').to_string())
@@ -1391,43 +1421,20 @@ fn set_node_global_path(base_dir: String) -> Result<(), String> {
             .replace("/", "\\")
             .trim_end_matches('\\')
             .to_string();
-        let escaped = target.replace('\'', "''");
+        let normalized_target = target.to_lowercase();
+        let existing = read_user_path_value()?;
+        let parts = existing
+            .split(';')
+            .map(|part| part.trim())
+            .filter(|part| !part.is_empty())
+            .map(|part| part.replace("/", "\\").trim_end_matches('\\').to_string())
+            .filter(|part| part.to_lowercase() != normalized_target)
+            .collect::<Vec<_>>();
 
-        let script = format!(
-            r#"
-$target = '{target}'
-$normalizedTarget = $target.ToLowerInvariant().TrimEnd('\')
-$existing = [Environment]::GetEnvironmentVariable('Path', 'User')
-$parts = @()
-
-if ($existing) {{
-    $parts = $existing -split ';' | Where-Object {{
-        $_ -and ($_.Trim() -ne '')
-    }} | ForEach-Object {{
-        $_.Trim()
-    }} | Where-Object {{
-        ($_.ToLowerInvariant().Replace('/','\').TrimEnd('\')) -ne $normalizedTarget
-    }}
-}}
-
-$newParts = @($target) + $parts
-$newPath = ($newParts -join ';').Trim(';')
-[Environment]::SetEnvironmentVariable('Path', $newPath, 'User')
-"#,
-            target = escaped
-        );
-
-        let output = run_hidden_powershell(&script)?;
-        if output.status.success() {
-            Ok(())
-        } else {
-            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-            Err(if stderr.is_empty() {
-                "Failed to update User PATH for Node.js".into()
-            } else {
-                stderr
-            })
-        }
+        let mut new_parts = vec![target];
+        new_parts.extend(parts);
+        let new_path = new_parts.join(";");
+        write_user_path_value(&new_path)
     }
     #[cfg(not(target_os = "windows"))]
     {

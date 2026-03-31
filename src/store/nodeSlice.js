@@ -57,6 +57,7 @@ export const createNodeSlice = (set, get) => ({
         }
 
         const existing = get().nodeVersions.find(v => v.version === version);
+        const hadExisting = !!existing;
         if (existing?.installed) {
             get().showToast(get().t('nodeAlreadyInstalled', { version }), 'info');
             return;
@@ -121,7 +122,9 @@ export const createNodeSlice = (set, get) => ({
         } catch (e) {
             console.error('installNodeVersion failed:', e);
             set(s => ({
-                nodeVersions: s.nodeVersions.map(v => v.version === version ? { ...v, installing: false } : v),
+                nodeVersions: hadExisting
+                    ? s.nodeVersions.map(v => v.version === version ? { ...v, installing: false } : v)
+                    : s.nodeVersions.filter(v => v.version !== version),
                 nodeInstallLogs: [...s.nodeInstallLogs, { t: new Date().toLocaleTimeString(), m: `Error: ${e}`, l: 'err' }]
             }));
             get().showToast(get().t('nodeInstallFailed', { error: `${e}` }), 'danger');
