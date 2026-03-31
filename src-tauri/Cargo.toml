@@ -38,6 +38,9 @@ tokio = { version = "1.50.0", features = ["full"] }
 zip-extract = "0.4.1"
 base64 = "0.22"
 
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+tauri-plugin-updater = "2"
+
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", features = [
     "Win32_NetworkManagement_IpHelper",

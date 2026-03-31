@@ -12,17 +12,59 @@ use sysinfo::{System, ProcessesToUpdate};
 use std::io::{Read, Write};
 use std::fs;
 use std::path::Path;
+use serde::{Deserialize, Serialize};
+#[cfg(target_os = "windows")]
+use std::process::Command;
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+use tauri_plugin_updater::{Update as TauriPendingUpdate, UpdaterExt};
+
+#[cfg(target_os = "windows")]
+const WINDOWS_STARTUP_TASK_NAME: &str = "DevStack Startup";
+const APP_UPDATE_API_URL: &str = "https://api.github.com/repos/holdon1996/dev-stack/releases/latest";
+const TAURI_UPDATER_ENDPOINT: Option<&str> = option_env!("TAURI_UPDATER_ENDPOINT");
+const TAURI_UPDATER_PUBKEY: Option<&str> = option_env!("TAURI_UPDATER_PUBKEY");
 
 struct AppState {
     sys: Mutex<System>,
     last_process_refresh: AtomicU64, // epoch ms of last refresh
     last_stats_refresh: AtomicU64,
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    pending_update: Mutex<Option<TauriPendingUpdate>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GithubReleaseAsset {
+    name: String,
+    browser_download_url: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct GithubLatestRelease {
+    tag_name: String,
+    html_url: String,
+    body: Option<String>,
+    published_at: Option<String>,
+    assets: Vec<GithubReleaseAsset>,
+}
+
+#[derive(Debug, Serialize)]
+struct AppUpdateInfo {
+    current_version: String,
+    latest_version: String,
+    available: bool,
+    notes: String,
+    published_at: Option<String>,
+    html_url: String,
+    download_url: Option<String>,
+    asset_name: Option<String>,
+    can_install: bool,
+    source: String,
+    native_configured: bool,
 }
 
 #[cfg(all(target_os = "windows", not(debug_assertions)))]
 fn ensure_elevated_on_startup() -> bool {
     use std::os::windows::process::CommandExt;
-    use std::process::Command;
     use windows_sys::Win32::UI::Shell::IsUserAnAdmin;
 
     if unsafe { IsUserAnAdmin() } != 0 {
@@ -143,6 +185,213 @@ fn cleanup_webview_state_for_fresh_install() -> Result<(), String> {
     Ok(())
 }
 
+#[cfg(target_os = "windows")]
+fn encode_powershell_command(script: &str) -> String {
+    let mut utf16_bytes = Vec::new();
+    for utf16_char in script.encode_utf16() {
+        utf16_bytes.extend_from_slice(&utf16_char.to_le_bytes());
+    }
+    use base64::{Engine as _, engine::general_purpose};
+    general_purpose::STANDARD.encode(utf16_bytes)
+}
+
+#[cfg(target_os = "windows")]
+fn run_hidden_powershell(script: &str) -> Result<std::process::Output, String> {
+    use std::os::windows::process::CommandExt;
+
+    const CREATE_NO_WINDOW: u32 = 0x08000000;
+    let encoded_ps_cmd = encode_powershell_command(script);
+
+    Command::new("powershell")
+        .args(&[
+            "-NoProfile",
+            "-NonInteractive",
+            "-WindowStyle",
+            "Hidden",
+            "-EncodedCommand",
+            &encoded_ps_cmd,
+        ])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output()
+        .map_err(|e| e.to_string())
+}
+
+#[cfg(target_os = "windows")]
+fn run_elevated_powershell(script: &str) -> Result<(), String> {
+    use std::os::windows::process::CommandExt;
+
+    const CREATE_NO_WINDOW: u32 = 0x08000000;
+    let encoded_ps_cmd = encode_powershell_command(script);
+
+    let status = Command::new("powershell")
+        .args(&[
+            "-NoProfile",
+            "-WindowStyle",
+            "Hidden",
+            "-Command",
+            &format!(
+                "Start-Process powershell -ArgumentList \"-NoProfile -WindowStyle Hidden -EncodedCommand {}\" -Verb RunAs -Wait",
+                encoded_ps_cmd
+            ),
+        ])
+        .creation_flags(CREATE_NO_WINDOW)
+        .status()
+        .map_err(|e| e.to_string())?;
+
+    if status.success() {
+        Ok(())
+    } else {
+        Err("PowerShell elevated command failed".into())
+    }
+}
+
+#[tauri::command]
+fn get_start_on_boot() -> Result<bool, String> {
+    #[cfg(target_os = "windows")]
+    {
+        let exe_path = std::env::current_exe().map_err(|e| e.to_string())?;
+        let exe_path = exe_path.display().to_string().replace('\'', "''");
+        let script = format!(
+            r#"
+$task = Get-ScheduledTask -TaskName '{task_name}' -ErrorAction SilentlyContinue
+if ($null -eq $task) {{
+    Write-Output 'false'
+    exit 0
+}}
+
+$expectedExe = '{exe_path}'
+$actionMatch = $false
+foreach ($action in $task.Actions) {{
+    if ($action.Execute -eq $expectedExe -and $action.Arguments -eq '--minimized') {{
+        $actionMatch = $true
+        break
+    }}
+}}
+
+if ($actionMatch -and $task.Principal.RunLevel -eq 'Highest') {{
+    Write-Output 'true'
+}} else {{
+    Write-Output 'false'
+}}
+"#,
+            task_name = WINDOWS_STARTUP_TASK_NAME,
+            exe_path = exe_path
+        );
+
+        let output = run_hidden_powershell(&script)?;
+        if !output.status.success() {
+            return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
+        }
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        return Ok(stdout.trim().eq_ignore_ascii_case("true"));
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        Ok(false)
+    }
+}
+
+#[tauri::command]
+fn set_start_on_boot(enabled: bool) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        let exe_path = std::env::current_exe().map_err(|e| e.to_string())?;
+        let exe_path = exe_path.display().to_string().replace('\'', "''");
+        let script = if enabled {
+            format!(
+                r#"
+$taskName = '{task_name}'
+$exePath = '{exe_path}'
+$userId = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+$action = New-ScheduledTaskAction -Execute $exePath -Argument '--minimized'
+$trigger = New-ScheduledTaskTrigger -AtLogOn -User $userId
+$settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
+$principal = New-ScheduledTaskPrincipal -UserId $userId -LogonType Interactive -RunLevel Highest
+Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Settings $settings -Principal $principal -Description 'Start DevStack on Windows logon with elevated privileges.' -Force | Out-Null
+"#,
+                task_name = WINDOWS_STARTUP_TASK_NAME,
+                exe_path = exe_path
+            )
+        } else {
+            format!(
+                "Unregister-ScheduledTask -TaskName '{}' -Confirm:$false -ErrorAction SilentlyContinue | Out-Null",
+                WINDOWS_STARTUP_TASK_NAME
+            )
+        };
+
+        let output = run_hidden_powershell(&script)?;
+        if output.status.success() {
+            return Ok(());
+        }
+
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if !stderr.is_empty() {
+            return Err(stderr);
+        }
+        if !stdout.is_empty() {
+            return Err(stdout);
+        }
+        return Err("Failed to update scheduled startup task".into());
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = enabled;
+        Err("Scheduled startup is only supported on Windows".into())
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn sync_hosts_entry(domain: &str, present: bool) -> Result<(), String> {
+    let hosts_path = "C:\\Windows\\System32\\drivers\\etc\\hosts".replace('\'', "''");
+    let entry = format!("127.0.0.1 {}", domain).replace('\'', "''");
+    let mode = if present { "present" } else { "absent" };
+    let script = format!(
+        r#"
+$path = '{hosts_path}'
+$entry = '{entry}'
+$mode = '{mode}'
+$bytes = [System.IO.File]::ReadAllBytes($path)
+
+if ($bytes.Length -ge 4 -and $bytes[0] -eq 0xFF -and $bytes[1] -eq 0xFE -and $bytes[2] -eq 0x00 -and $bytes[3] -eq 0x00) {{
+    $encoding = [System.Text.Encoding]::UTF32
+}} elseif ($bytes.Length -ge 4 -and $bytes[0] -eq 0x00 -and $bytes[1] -eq 0x00 -and $bytes[2] -eq 0xFE -and $bytes[3] -eq 0xFF) {{
+    $encoding = [System.Text.Encoding]::GetEncoding('utf-32BE')
+}} elseif ($bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF) {{
+    $encoding = New-Object System.Text.UTF8Encoding($true)
+}} elseif ($bytes.Length -ge 2 -and $bytes[0] -eq 0xFF -and $bytes[1] -eq 0xFE) {{
+    $encoding = [System.Text.Encoding]::Unicode
+}} elseif ($bytes.Length -ge 2 -and $bytes[0] -eq 0xFE -and $bytes[1] -eq 0xFF) {{
+    $encoding = [System.Text.Encoding]::BigEndianUnicode
+}} else {{
+    $encoding = [System.Text.Encoding]::Default
+}}
+
+$content = $encoding.GetString($bytes)
+
+if ($mode -eq 'present') {{
+    if (-not [regex]::IsMatch($content, '(?m)^' + [regex]::Escape($entry) + '$')) {{
+        if ($content.Length -gt 0 -and -not ($content.EndsWith("`r`n") -or $content.EndsWith("`n"))) {{
+            $content += "`r`n"
+        }}
+        $content += $entry + "`r`n"
+        [System.IO.File]::WriteAllText($path, $content, $encoding)
+    }}
+}} else {{
+    $updated = [regex]::Replace($content, '(?m)^' + [regex]::Escape($entry) + '\r?\n?', '')
+    if ($updated -ne $content) {{
+        [System.IO.File]::WriteAllText($path, $updated, $encoding)
+    }}
+}}
+"#
+    );
+
+    run_elevated_powershell(&script)
+}
+
 fn copy_first_existing_template(dest_path: &Path, target_name: &str, candidates: &[&str]) -> Result<bool, String> {
     for candidate in candidates {
         let source = dest_path.join(candidate);
@@ -153,6 +402,251 @@ fn copy_first_existing_template(dest_path: &Path, target_name: &str, candidates:
         }
     }
     Ok(false)
+}
+
+fn normalize_version_for_compare(input: &str) -> Vec<u32> {
+    input
+        .trim()
+        .trim_start_matches(['v', 'V'])
+        .split(['.', '-', '+'])
+        .map(|part| part.parse::<u32>().unwrap_or(0))
+        .collect()
+}
+
+fn is_version_newer(candidate: &str, current: &str) -> bool {
+    use std::cmp::Ordering;
+
+    let left = normalize_version_for_compare(candidate);
+    let right = normalize_version_for_compare(current);
+    let max_len = left.len().max(right.len());
+
+    for idx in 0..max_len {
+        let l = *left.get(idx).unwrap_or(&0);
+        let r = *right.get(idx).unwrap_or(&0);
+        match l.cmp(&r) {
+            Ordering::Greater => return true,
+            Ordering::Less => return false,
+            Ordering::Equal => {}
+        }
+    }
+
+    false
+}
+
+fn pick_release_download_asset(assets: &[GithubReleaseAsset]) -> Option<&GithubReleaseAsset> {
+    let preferred_suffixes = [
+        "-setup.exe",
+        ".msi",
+        ".exe",
+        ".nsis.zip",
+        ".msi.zip",
+    ];
+
+    for suffix in preferred_suffixes {
+        if let Some(asset) = assets.iter().find(|asset| asset.name.to_lowercase().ends_with(suffix)) {
+            return Some(asset);
+        }
+    }
+
+    assets.first()
+}
+
+fn configured_native_updater() -> Option<(&'static str, &'static str)> {
+    let endpoint = TAURI_UPDATER_ENDPOINT.map(str::trim).filter(|s| !s.is_empty())?;
+    let pubkey = TAURI_UPDATER_PUBKEY.map(str::trim).filter(|s| !s.is_empty())?;
+    Some((endpoint, pubkey))
+}
+
+#[tauri::command]
+async fn check_app_update(app: tauri::AppHandle, state: tauri::State<'_, AppState>) -> Result<AppUpdateInfo, String> {
+    let current_version = app.package_info().version.to_string();
+
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    if let Some((endpoint, pubkey)) = configured_native_updater() {
+        let update_url = reqwest::Url::parse(endpoint).map_err(|e| e.to_string())?;
+        let update = app
+            .updater_builder()
+            .pubkey(pubkey)
+            .endpoints(vec![update_url])
+            .map_err(|e| e.to_string())?
+            .build()
+            .map_err(|e| e.to_string())?
+            .check()
+            .await
+            .map_err(|e| e.to_string())?;
+
+        let update_info = if let Some(update) = update.as_ref() {
+            AppUpdateInfo {
+                current_version: update.current_version.clone(),
+                latest_version: update.version.clone(),
+                available: true,
+                notes: update.body.clone().unwrap_or_default().trim().to_string(),
+                published_at: update.date.as_ref().map(|d| d.to_string()),
+                html_url: endpoint.to_string(),
+                download_url: None,
+                asset_name: None,
+                can_install: true,
+                source: "tauri".into(),
+                native_configured: true,
+            }
+        } else {
+            AppUpdateInfo {
+                current_version: current_version.clone(),
+                latest_version: current_version.clone(),
+                available: false,
+                notes: String::new(),
+                published_at: None,
+                html_url: endpoint.to_string(),
+                download_url: None,
+                asset_name: None,
+                can_install: false,
+                source: "tauri".into(),
+                native_configured: true,
+            }
+        };
+
+        *state.pending_update.lock().unwrap() = update;
+        return Ok(update_info);
+    }
+
+    let client = reqwest::Client::builder()
+        .user_agent("DevStack-Updater")
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    let response = client
+        .get(APP_UPDATE_API_URL)
+        .header("Accept", "application/vnd.github+json")
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    if response.status() == reqwest::StatusCode::NOT_FOUND {
+        return Err("No published GitHub release found yet".into());
+    }
+
+    let response = response.error_for_status().map_err(|e| e.to_string())?;
+    let release: GithubLatestRelease = response.json().await.map_err(|e| e.to_string())?;
+    let latest_version = release.tag_name.trim().trim_start_matches('v').to_string();
+    let selected_asset = pick_release_download_asset(&release.assets);
+
+    Ok(AppUpdateInfo {
+        current_version: current_version.clone(),
+        latest_version: latest_version.clone(),
+        available: is_version_newer(&latest_version, &current_version),
+        notes: release.body.unwrap_or_default().trim().to_string(),
+        published_at: release.published_at,
+        html_url: release.html_url,
+        download_url: selected_asset.map(|asset| asset.browser_download_url.clone()),
+        asset_name: selected_asset.map(|asset| asset.name.clone()),
+        can_install: false,
+        source: "github".into(),
+        native_configured: configured_native_updater().is_some(),
+    })
+}
+
+#[tauri::command]
+fn open_external_target(target: String) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+
+        Command::new("cmd")
+            .args(["/C", "start", "", &target])
+            .creation_flags(CREATE_NO_WINDOW)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+        return Ok(());
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg(&target)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+        return Ok(());
+    }
+
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        std::process::Command::new("xdg-open")
+            .arg(&target)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+        return Ok(());
+    }
+
+    #[allow(unreachable_code)]
+    Err("Opening external targets is not supported on this platform".into())
+}
+
+#[tauri::command]
+async fn install_app_update(app: tauri::AppHandle, state: tauri::State<'_, AppState>) -> Result<(), String> {
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    {
+        if configured_native_updater().is_none() {
+            return Err("Native updater is not configured for this build".into());
+        }
+
+        let Some(update) = state.pending_update.lock().unwrap().take() else {
+            return Err("There is no pending update. Please check for updates again.".into());
+        };
+
+        let started = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let app_handle = app.clone();
+        let started_flag = started.clone();
+
+        update
+            .download_and_install(
+                move |chunk_length, content_length| {
+                    if !started_flag.swap(true, Ordering::SeqCst) {
+                        let _ = app_handle.emit(
+                            "app-update-download",
+                            serde_json::json!({
+                                "event": "Started",
+                                "data": {
+                                    "contentLength": content_length
+                                }
+                            }),
+                        );
+                    }
+
+                    let _ = app_handle.emit(
+                        "app-update-download",
+                        serde_json::json!({
+                            "event": "Progress",
+                            "data": {
+                                "chunkLength": chunk_length
+                            }
+                        }),
+                    );
+                },
+                || {
+                    let _ = app.emit(
+                        "app-update-download",
+                        serde_json::json!({
+                            "event": "Finished"
+                        }),
+                    );
+                },
+            )
+            .await
+            .map_err(|e| e.to_string())?;
+
+        #[cfg(not(target_os = "windows"))]
+        app.request_restart();
+
+        return Ok(());
+    }
+
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    {
+        let _ = app;
+        let _ = state;
+        Err("Native updater is not supported on this platform".into())
+    }
 }
 
 fn build_default_mysql_ini(mysql_root: &str, mysql_port: u16) -> String {
@@ -1196,45 +1690,9 @@ fn setup_virtual_host(
 
 
     // 3) Update hosts file (requires admin)
-    let hosts_path = "C:\\Windows\\System32\\drivers\\etc\\hosts";
-    let entry = format!("127.0.0.1 {}", domain);
-    
-    match std::fs::read_to_string(hosts_path) {
-        Ok(content) => {
-            if !content.contains(&entry) {
-                use std::process::Command;
-                use std::os::windows::process::CommandExt;
-                const CREATE_NO_WINDOW: u32 = 0x08000000;
-                
-                // Format the PowerShell command
-                let ps_cmd = format!("Add-Content -Path '{}' -Value \"`r`n{}\" -ErrorAction Stop", hosts_path, entry);
-                
-                // Encode the command to Base64 (UTF-16LE) to bypass all quoting issues
-                // PowerShell's -EncodedCommand expects a UTF-16LE Base64 string.
-                let mut utf16_bytes = Vec::new();
-                for utf16_char in ps_cmd.encode_utf16() {
-                    utf16_bytes.extend_from_slice(&utf16_char.to_le_bytes());
-                }
-                use base64::{Engine as _, engine::general_purpose};
-                let encoded_ps_cmd = general_purpose::STANDARD.encode(utf16_bytes);
-
-                let status = Command::new("powershell")
-                    .args(&[
-                        "-NoProfile", 
-                        "-WindowStyle", "Hidden", 
-                        "-Command", 
-                        &format!("Start-Process powershell -ArgumentList \"-NoProfile -WindowStyle Hidden -EncodedCommand {}\" -Verb RunAs -Wait", encoded_ps_cmd)
-                    ])
-                    .creation_flags(CREATE_NO_WINDOW)
-                    .status();
-
-                if status.is_err() || !status.unwrap().success() {
-                     return Err("Không thể cập nhật file hosts. Vui lòng cấp quyền Administrator cho ứng dụng.".into());
-                }
-            }
-        },
-        Err(_) => return Err("Không thể đọc file hosts hệ thống.".into()),
-    }
+    sync_hosts_entry(&domain, true).map_err(|_| {
+        "Không thể cập nhật file hosts. Vui lòng cấp quyền Administrator cho ứng dụng.".to_string()
+    })?;
 
     Ok("SUCCESS".into())
 }
@@ -1723,14 +2181,27 @@ async fn fetch_php_versions() -> Result<Vec<serde_json::Value>, String> {
 
 
 #[tauri::command]
-async fn run_mysql_query(exe_path: String, query: String) -> Result<String, String> {
+async fn run_mysql_query(exe_path: String, query: String, port: Option<u16>) -> Result<String, String> {
     #[cfg(target_os = "windows")]
     {
         use std::os::windows::process::CommandExt;
         const CREATE_NO_WINDOW: u32 = 0x08000000;
+        let mysql_port = port.unwrap_or(3306).to_string();
         
         let output = std::process::Command::new(exe_path)
-            .args(["-u", "root", "-N", "-e", &query])
+            .args([
+                "--protocol=TCP",
+                "-h",
+                "127.0.0.1",
+                "-P",
+                &mysql_port,
+                "--connect-timeout=5",
+                "-u",
+                "root",
+                "-N",
+                "-e",
+                &query,
+            ])
             .creation_flags(CREATE_NO_WINDOW)
             .output()
             .map_err(|e| e.to_string())?;
@@ -1862,28 +2333,8 @@ fn remove_virtual_host(domain: String, vhosts_file: String) -> Result<String, St
         
         let _ = std::fs::write(&vhosts_file, out_content.trim_end());
         
-        // Remove from hosts file (requires admin)
-        let hosts_path = "C:\\Windows\\System32\\drivers\\etc\\hosts";
-        let entry = format!("127.0.0.1 {}", domain);
-        if let Ok(hosts_content) = std::fs::read_to_string(hosts_path) {
-            if hosts_content.contains(&entry) {
-                use std::process::Command;
-                use std::os::windows::process::CommandExt;
-                let ps_cmd = format!("(Get-Content '{}') -replace '^{}$', '' | Set-Content '{}'", hosts_path, regex::escape(&entry), hosts_path);
-                
-                let mut utf16_bytes = Vec::new();
-                for utf16_char in ps_cmd.encode_utf16() {
-                    utf16_bytes.extend_from_slice(&utf16_char.to_le_bytes());
-                }
-                use base64::{Engine as _, engine::general_purpose};
-                let encoded_ps_cmd = general_purpose::STANDARD.encode(utf16_bytes);
-
-                let _ = Command::new("powershell")
-                    .args(&["-NoProfile", "-WindowStyle", "Hidden", "-Command", "Start-Process", "powershell", "-ArgumentList", &format!("'-NoProfile -EncodedCommand {}'", encoded_ps_cmd), "-Verb", "RunAs", "-WindowStyle", "Hidden"])
-                    .creation_flags(0x08000000)
-                    .status();
-            }
-        }
+        // Remove from hosts file (requires admin) while preserving the file encoding.
+        let _ = sync_hosts_entry(&domain, false);
         
         return Ok("SUCCESS".to_string());
     }
@@ -1901,6 +2352,14 @@ pub fn run() {
             sys: Mutex::new(System::new_all()),
             last_process_refresh: AtomicU64::new(0),
             last_stats_refresh: AtomicU64::new(0),
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            pending_update: Mutex::new(None),
+        })
+        .setup(|app| {
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            app.handle().plugin(tauri_plugin_updater::Builder::new().build())?;
+
+            Ok(())
         })
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_fs::init())
@@ -1926,6 +2385,11 @@ pub fn run() {
             ensure_apache_log_files,
             open_main_devtools,
             is_app_elevated,
+            check_app_update,
+            install_app_update,
+            open_external_target,
+            get_start_on_boot,
+            set_start_on_boot,
             kill_process_by_port,
             kill_process_by_port_admin,
             kill_process_by_name,

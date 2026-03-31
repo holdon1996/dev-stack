@@ -393,6 +393,7 @@ export const createServiceSlice = (set, get) => ({
 
         // Initial checks and scans
         await get().detectElevation?.();
+        await get().syncStartOnBootSetting?.();
         await get().checkServicesRunning();
         get().scanInstalledApache();
         get().scanInstalledPhp();

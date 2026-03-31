@@ -17,16 +17,48 @@ export const createConfigSlice = (set, get) => ({
     portConflicts: {},
 
     toggleSetting: async (key) => {
-        set(s => ({ settings: { ...s.settings, [key]: !s.settings[key] } }));
-        // Apply startOnBoot logic
         if (key === 'startOnBoot') {
+            const nextValue = !get().settings.startOnBoot;
             try {
-                const { enable, disable } = await import('@tauri-apps/plugin-autostart');
-                const isEnabled = get().settings.startOnBoot;
-                if (isEnabled) await enable(); else await disable();
+                const currentPlatform = navigator.userAgent.toLowerCase().includes('windows') ? 'windows' : 'other';
+
+                if (currentPlatform === 'windows') {
+                    const { invoke } = await import('@tauri-apps/api/core');
+                    await invoke('set_start_on_boot', { enabled: nextValue });
+                } else {
+                    const { enable, disable } = await import('@tauri-apps/plugin-autostart');
+                    if (nextValue) await enable();
+                    else await disable();
+                }
+
+                set(s => ({ settings: { ...s.settings, startOnBoot: nextValue } }));
+                get().showToast(nextValue ? get().t('startOnBootEnabled') : get().t('startOnBootDisabled'), nextValue ? 'ok' : 'info');
             } catch (e) {
-                console.error('Autostart plugin error', e);
+                console.error('startOnBoot update error', e);
+                get().showToast(get().t('startOnBootUpdateError', { error: `${e}` }), 'danger');
             }
+            return;
+        }
+
+        set(s => ({ settings: { ...s.settings, [key]: !s.settings[key] } }));
+    },
+
+    syncStartOnBootSetting: async () => {
+        try {
+            const currentPlatform = navigator.userAgent.toLowerCase().includes('windows') ? 'windows' : 'other';
+            let enabled = false;
+
+            if (currentPlatform === 'windows') {
+                const { invoke } = await import('@tauri-apps/api/core');
+                enabled = !!(await invoke('get_start_on_boot'));
+            } else {
+                const { isEnabled } = await import('@tauri-apps/plugin-autostart');
+                enabled = await isEnabled();
+            }
+
+            set(s => ({ settings: { ...s.settings, startOnBoot: enabled } }));
+        } catch (e) {
+            console.error('startOnBoot sync error', e);
         }
     },
 
@@ -239,7 +271,7 @@ export const createConfigSlice = (set, get) => ({
             const activeApache = apacheVersions.find(v => v.active)?.version;
 
             if (activeApache && siteDomain) {
-                const vhostsFile = `${settings.devStackDir}/bin/apache/apache-${activeApache}/conf/extra/httpd-vhosts.conf`.replace(/\\/ / g, '\\\\');
+                const vhostsFile = `${settings.devStackDir}/bin/apache/apache-${activeApache}/conf/extra/httpd-vhosts.conf`.replace(/\\/g, '\\\\');
                 await invoke('remove_virtual_host', { domain: siteDomain, vhostsFile });
                 // Auto restart apache to clear config
                 get().restartApache();
@@ -247,7 +279,7 @@ export const createConfigSlice = (set, get) => ({
 
             if (sitePath) {
                 try {
-                    await invoke('remove_dir', { path: sitePath.replace(/\\/ / g, '\\\\') });
+                    await invoke('remove_dir', { path: sitePath.replace(/\\/g, '\\\\') });
                 } catch (e) {
                     console.error('Failed to remove docroot dir:', e);
                 }
@@ -410,7 +442,11 @@ export const createConfigSlice = (set, get) => ({
                 "SELECT TABLE_SCHEMA, ROUND(SUM(DATA_LENGTH + INDEX_LENGTH) / 1024 / 1024, 2) FROM information_schema.TABLES GROUP BY TABLE_SCHEMA;"
             ].join(' ');
 
-            const raw = await invoke('run_mysql_query', { exePath: mysqlBin, query });
+            const raw = await invoke('run_mysql_query', {
+                exePath: mysqlBin,
+                query,
+                port: parseInt(get().settings.portMySQL || 3306, 10)
+            });
 
             if (raw) {
                 const lines = raw.trim().split(/\r?\n/).map(l => l.trim());

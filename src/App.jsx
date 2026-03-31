@@ -21,13 +21,14 @@ import { useSystemStats } from './hooks/useSystemStats';
 const appWindow = getCurrentWindow();
 
 function App() {
-  const { activePage, initApp, killAllChildProcesses, addServiceLog } = useStore();
+  const { activePage, initApp, killAllChildProcesses, addServiceLog, checkAppUpdate } = useStore();
 
   useServicePoll();
   useSystemStats();
 
   useEffect(() => {
     initApp();
+    checkAppUpdate(true);
   }, []);
 
   // Global error handler — pipes all JS errors to Nhật ký tab (visible in built app without DevTools)
@@ -122,4 +123,3 @@ function App() {
 }
 
 export default App;
-

@@ -1,9 +1,24 @@
 import React from 'react';
 import { useStore } from '../store';
-import { Bug, FolderSearch, RefreshCw } from 'lucide-react';
+import { Bug, Download, FolderSearch, RefreshCw } from 'lucide-react';
 
 const PageSettings = () => {
-  const { settings, toggleSetting, updateSetting, showToast, locale, setLocale, browseForFolder, browseForEditor, initApp, t } = useStore();
+  const {
+    settings,
+    toggleSetting,
+    updateSetting,
+    showToast,
+    locale,
+    setLocale,
+    browseForFolder,
+    browseForEditor,
+    initApp,
+    t,
+    appUpdate,
+    checkAppUpdate,
+    openAppUpdateUrl,
+    installAppUpdate,
+  } = useStore();
 
   // Local state for paths to prevent immediate rescanning while typing
   const [localRootPath, setLocalRootPath] = React.useState(settings.rootPath);
@@ -99,6 +114,26 @@ const PageSettings = () => {
     }
   };
 
+  const updateStatusTone = {
+    idle: 'text-muted border-border',
+    checking: 'text-info border-[#2e6ef733]',
+    'up-to-date': 'text-accent border-[#00e5a033]',
+    available: 'text-warn border-[#f5a62333]',
+    error: 'text-danger border-[#ff4d6d33]'
+  };
+
+  const updateStatusLabel = (() => {
+    if (appUpdate.status === 'checking') return t('updateChecking');
+    if (appUpdate.status === 'up-to-date') return t('updateUpToDate');
+    if (appUpdate.status === 'available') return t('updateAvailable');
+    if (appUpdate.status === 'error') return t('updateCheckError');
+    return t('updateIdle');
+  })();
+
+  const installProgressPct = appUpdate.totalBytes > 0
+    ? Math.min(100, Math.round((appUpdate.downloadedBytes / appUpdate.totalBytes) * 100))
+    : 0;
+
   return (
     <div className="flex-1 flex flex-col overflow-y-auto">
       <div className="px-6 py-5 border-b border-[#1a1c22] bg-bg flex items-center">
@@ -178,6 +213,113 @@ const PageSettings = () => {
               </button>
             </div>
             <span className="text-[11px] text-muted">{t('defaultEditorDesc')}</span>
+          </div>
+        </div>
+
+        <div className="bg-surface border border-border rounded-xl p-5 flex flex-col gap-4">
+          <div className="flex items-center justify-between border-b border-border pb-3">
+            <div>
+              <div className="text-[11px] font-bold text-muted tracking-[0.08em] uppercase">{t('appUpdates')}</div>
+              <div className="text-[11px] text-muted mt-1">{t('appUpdatesDesc')}</div>
+            </div>
+            <button className="btn-ghost flex items-center gap-2" onClick={() => checkAppUpdate(false)}>
+              <RefreshCw size={14} /> {t('checkForUpdates')}
+            </button>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div className="bg-panel/50 border border-border rounded-2xl p-4">
+              <div className="text-[11px] text-muted uppercase tracking-[0.08em]">{t('currentVersion')}</div>
+              <div className="text-[18px] font-extrabold mt-2">{appUpdate.currentVersion || '—'}</div>
+            </div>
+            <div className="bg-panel/50 border border-border rounded-2xl p-4">
+              <div className="text-[11px] text-muted uppercase tracking-[0.08em]">{t('latestVersion')}</div>
+              <div className="text-[18px] font-extrabold mt-2">{appUpdate.latestVersion || '—'}</div>
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <div className={`tag bg-transparent ${updateStatusTone[appUpdate.status] || updateStatusTone.idle}`}>
+              {updateStatusLabel}
+            </div>
+            {appUpdate.lastCheckedAt ? (
+              <div className="text-[11px] text-muted">
+                {t('lastChecked')}: {new Date(appUpdate.lastCheckedAt).toLocaleString()}
+              </div>
+            ) : null}
+          </div>
+
+          {appUpdate.publishedAt ? (
+            <div className="text-[12px] text-textDim">
+              {t('releasePublished')}: {new Date(appUpdate.publishedAt).toLocaleString()}
+            </div>
+          ) : null}
+
+          {appUpdate.assetName ? (
+            <div className="text-[12px] text-textDim">
+              {t('updateAsset')}: <span className="font-mono text-text">{appUpdate.assetName}</span>
+            </div>
+          ) : null}
+
+          <div className="text-[12px] text-textDim">
+            {t('updateMode')}: {appUpdate.canInstall ? t('updateModeNative') : t('updateModeManual')}
+          </div>
+
+          {!appUpdate.nativeConfigured ? (
+            <div className="text-[12px] text-warn bg-[#f5a62312] border border-[#f5a62333] rounded-2xl p-3">
+              {t('updateNativeSetupHint')}
+            </div>
+          ) : null}
+
+          {appUpdate.installStatus !== 'idle' ? (
+            <div className="bg-panel/50 border border-border rounded-2xl p-4">
+              <div className="flex items-center justify-between gap-3">
+                <div className="text-[12px] text-textDim">{t('updateInstallStatus')}</div>
+                <div className="text-[12px] font-semibold text-text">
+                  {appUpdate.installStatus === 'downloading' ? `${t('updateDownloading')} ${installProgressPct}%` :
+                    appUpdate.installStatus === 'installing' ? t('updateInstalling') :
+                      appUpdate.installStatus === 'installed' ? t('updateInstalled') :
+                        appUpdate.installStatus === 'error' ? t('updateInstallError') : '—'}
+                </div>
+              </div>
+              {appUpdate.installStatus === 'downloading' ? (
+                <div className="mt-3">
+                  <div className="bar-bg">
+                    <div className="bar-fill" style={{ width: `${installProgressPct}%` }} />
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+
+          {appUpdate.notes ? (
+            <div className="bg-panel/50 border border-border rounded-2xl p-4">
+              <div className="text-[11px] text-muted uppercase tracking-[0.08em] mb-2">{t('releaseNotes')}</div>
+              <div className="text-[12px] text-textDim whitespace-pre-wrap max-h-44 overflow-y-auto leading-relaxed">
+                {appUpdate.notes}
+              </div>
+            </div>
+          ) : null}
+
+          {appUpdate.error ? (
+            <div className="text-[12px] text-danger bg-[#ff4d6d12] border border-[#ff4d6d33] rounded-2xl p-3">
+              {appUpdate.error}
+            </div>
+          ) : null}
+
+          <div className="flex items-center gap-2">
+            {appUpdate.available && appUpdate.canInstall ? (
+              <button className="btn-primary flex items-center gap-2" onClick={installAppUpdate}>
+                <Download size={14} /> {t('installUpdate')}
+              </button>
+            ) : null}
+            <button
+              className="btn-ghost flex items-center gap-2"
+              onClick={openAppUpdateUrl}
+              disabled={!appUpdate.downloadUrl && !appUpdate.htmlUrl}
+            >
+              <Download size={14} /> {appUpdate.downloadUrl ? t('downloadUpdate') : t('openReleasePage')}
+            </button>
           </div>
         </div>
 
