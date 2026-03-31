@@ -1,6 +1,10 @@
 # DevStack
 
 <p align="center">
+  <img src="src-tauri/icons/icon.png" alt="DevStack Icon" width="120">
+</p>
+
+<p align="center">
   Desktop local development environment for Windows, built with Tauri v2 + React.
 </p>
 
