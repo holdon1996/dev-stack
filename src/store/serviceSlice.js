@@ -398,6 +398,7 @@ export const createServiceSlice = (set, get) => ({
         get().scanInstalledApache();
         get().scanInstalledPhp();
         get().scanInstalledMysql();
+        get().scanInstalledNode?.();
         get().scanSites();
 
         const autoMap = get().settings.autoStartMap || {};
@@ -430,15 +431,17 @@ export const createServiceSlice = (set, get) => ({
         const s = get().settings;
         const devDir = (s.devStackDir || 'C:/devstack');
         const targetPath = (prjPath || s.rootPath || devDir).replace(/\//g, '\\');
-
-        const phpActive = get().phpVersions.find(v => v.active);
         const { invoke } = await import('@tauri-apps/api/core');
+        const activeNode = get().nodeVersions?.find(v => v.active);
+        const nodePathPrefix = activeNode
+            ? `set "PATH=${devDir.replace(/\//g, '\\')}\\bin\\node\\current;%PATH%" && `
+            : '';
 
         // We use cmd.exe as a wrapper to set the title and current directory easily
         // but start it detached.
         await invoke('start_detached_process', {
             executable: 'cmd.exe',
-            args: ['/C', 'start', 'cmd.exe', '/K', `cd /d "${targetPath}" && title DevStack Terminal`]
+            args: ['/C', 'start', 'cmd.exe', '/K', `${nodePathPrefix}cd /d "${targetPath}" && title DevStack Terminal`]
         });
     },
 

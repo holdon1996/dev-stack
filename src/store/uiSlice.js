@@ -68,7 +68,12 @@ export const createUiSlice = (set, get) => ({
 
         try {
             const { invoke } = await import('@tauri-apps/api/core');
-            const result = await invoke('check_app_update');
+            const result = await Promise.race([
+                invoke('check_app_update'),
+                new Promise((_, reject) => {
+                    setTimeout(() => reject(new Error('Update check timed out')), 15000);
+                })
+            ]);
             const now = new Date().toISOString();
 
             set({

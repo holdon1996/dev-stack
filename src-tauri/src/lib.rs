@@ -12,6 +12,7 @@ use sysinfo::{System, ProcessesToUpdate};
 use std::io::{Read, Write};
 use std::fs;
 use std::path::Path;
+use std::time::Duration;
 use serde::{Deserialize, Serialize};
 #[cfg(target_os = "windows")]
 use std::process::Command;
@@ -21,8 +22,7 @@ use tauri_plugin_updater::{Update as TauriPendingUpdate, UpdaterExt};
 #[cfg(target_os = "windows")]
 const WINDOWS_STARTUP_TASK_NAME: &str = "DevStack Startup";
 const APP_UPDATE_API_URL: &str = "https://api.github.com/repos/holdon1996/dev-stack/releases/latest";
-const TAURI_UPDATER_ENDPOINT: Option<&str> = option_env!("TAURI_UPDATER_ENDPOINT");
-const TAURI_UPDATER_PUBKEY: Option<&str> = option_env!("TAURI_UPDATER_PUBKEY");
+const APP_RELEASES_URL: &str = "https://github.com/holdon1996/dev-stack/releases";
 
 struct AppState {
     sys: Mutex<System>,
@@ -451,66 +451,56 @@ fn pick_release_download_asset(assets: &[GithubReleaseAsset]) -> Option<&GithubR
     assets.first()
 }
 
-fn configured_native_updater() -> Option<(&'static str, &'static str)> {
-    let endpoint = TAURI_UPDATER_ENDPOINT.map(str::trim).filter(|s| !s.is_empty())?;
-    let pubkey = TAURI_UPDATER_PUBKEY.map(str::trim).filter(|s| !s.is_empty())?;
-    Some((endpoint, pubkey))
-}
-
 #[tauri::command]
 async fn check_app_update(app: tauri::AppHandle, state: tauri::State<'_, AppState>) -> Result<AppUpdateInfo, String> {
     let current_version = app.package_info().version.to_string();
+    let mut native_configured = false;
 
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
-    if let Some((endpoint, pubkey)) = configured_native_updater() {
-        let update_url = reqwest::Url::parse(endpoint).map_err(|e| e.to_string())?;
-        let update = app
-            .updater_builder()
-            .pubkey(pubkey)
-            .endpoints(vec![update_url])
-            .map_err(|e| e.to_string())?
-            .build()
-            .map_err(|e| e.to_string())?
-            .check()
-            .await
-            .map_err(|e| e.to_string())?;
+    {
+        if let Ok(updater) = app.updater() {
+            native_configured = true;
+            if let Ok(update) = updater.check().await {
+                let update_info = if let Some(update) = update.as_ref() {
+                    AppUpdateInfo {
+                        current_version: update.current_version.clone(),
+                        latest_version: update.version.clone(),
+                        available: true,
+                        notes: update.body.clone().unwrap_or_default().trim().to_string(),
+                        published_at: update.date.as_ref().map(|d| d.to_string()),
+                        html_url: APP_RELEASES_URL.to_string(),
+                        download_url: None,
+                        asset_name: None,
+                        can_install: true,
+                        source: "tauri".into(),
+                        native_configured: true,
+                    }
+                } else {
+                    AppUpdateInfo {
+                        current_version: current_version.clone(),
+                        latest_version: current_version.clone(),
+                        available: false,
+                        notes: String::new(),
+                        published_at: None,
+                        html_url: APP_RELEASES_URL.to_string(),
+                        download_url: None,
+                        asset_name: None,
+                        can_install: false,
+                        source: "tauri".into(),
+                        native_configured: true,
+                    }
+                };
 
-        let update_info = if let Some(update) = update.as_ref() {
-            AppUpdateInfo {
-                current_version: update.current_version.clone(),
-                latest_version: update.version.clone(),
-                available: true,
-                notes: update.body.clone().unwrap_or_default().trim().to_string(),
-                published_at: update.date.as_ref().map(|d| d.to_string()),
-                html_url: endpoint.to_string(),
-                download_url: None,
-                asset_name: None,
-                can_install: true,
-                source: "tauri".into(),
-                native_configured: true,
+                *state.pending_update.lock().unwrap() = update;
+                return Ok(update_info);
             }
-        } else {
-            AppUpdateInfo {
-                current_version: current_version.clone(),
-                latest_version: current_version.clone(),
-                available: false,
-                notes: String::new(),
-                published_at: None,
-                html_url: endpoint.to_string(),
-                download_url: None,
-                asset_name: None,
-                can_install: false,
-                source: "tauri".into(),
-                native_configured: true,
-            }
-        };
-
-        *state.pending_update.lock().unwrap() = update;
-        return Ok(update_info);
+        }
     }
 
     let client = reqwest::Client::builder()
         .user_agent("DevStack-Updater")
+        .timeout(Duration::from_secs(12))
+        .connect_timeout(Duration::from_secs(8))
         .build()
         .map_err(|e| e.to_string())?;
 
@@ -541,7 +531,7 @@ async fn check_app_update(app: tauri::AppHandle, state: tauri::State<'_, AppStat
         asset_name: selected_asset.map(|asset| asset.name.clone()),
         can_install: false,
         source: "github".into(),
-        native_configured: configured_native_updater().is_some(),
+        native_configured,
     })
 }
 
@@ -586,10 +576,6 @@ fn open_external_target(target: String) -> Result<(), String> {
 async fn install_app_update(app: tauri::AppHandle, state: tauri::State<'_, AppState>) -> Result<(), String> {
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
-        if configured_native_updater().is_none() {
-            return Err("Native updater is not configured for this build".into());
-        }
-
         let Some(update) = state.pending_update.lock().unwrap().take() else {
             return Err("There is no pending update. Please check for updates again.".into());
         };
@@ -1120,6 +1106,211 @@ fn list_subdirs(path: String) -> Vec<String> {
         }
     }
     dirs
+}
+
+#[derive(Debug, Serialize)]
+struct NodeVersionState {
+    version: String,
+    installed: bool,
+    active: bool,
+    path: String,
+}
+
+fn normalize_node_version_tag(tag: &str) -> Result<String, String> {
+    let trimmed = tag.trim();
+    if trimmed.is_empty() {
+        return Err("Node version tag is required".into());
+    }
+
+    let normalized = trimmed.trim_start_matches('v');
+    let is_valid = normalized
+        .chars()
+        .all(|c| c.is_ascii_digit() || c == '.')
+        && normalized.split('.').all(|part| !part.is_empty());
+
+    if !is_valid {
+        return Err(format!("Invalid Node version tag: {}", tag));
+    }
+
+    Ok(normalized.to_string())
+}
+
+fn node_root_dir(base_dir: &str) -> std::path::PathBuf {
+    Path::new(base_dir).join("bin").join("node")
+}
+
+fn node_version_dir(base_dir: &str, version: &str) -> std::path::PathBuf {
+    node_root_dir(base_dir).join(format!("node-v{}", version))
+}
+
+fn node_current_dir(base_dir: &str) -> std::path::PathBuf {
+    node_root_dir(base_dir).join("current")
+}
+
+fn detect_active_node_version_internal(base_dir: &str) -> Result<Option<String>, String> {
+    let current_exe = node_current_dir(base_dir).join("node.exe");
+    if !current_exe.exists() {
+        return Ok(None);
+    }
+
+    let output = std::process::Command::new(&current_exe)
+        .arg("-v")
+        .output()
+        .map_err(|e| format!("Failed to query active Node version: {}", e))?;
+
+    if !output.status.success() {
+        return Ok(None);
+    }
+
+    let version = String::from_utf8_lossy(&output.stdout)
+        .trim()
+        .trim_start_matches('v')
+        .to_string();
+
+    if version.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(version))
+    }
+}
+
+#[tauri::command]
+fn list_node_versions(base_dir: String) -> Result<Vec<NodeVersionState>, String> {
+    let root = node_root_dir(&base_dir);
+    fs::create_dir_all(&root).map_err(|e| e.to_string())?;
+
+    let active = detect_active_node_version_internal(&base_dir)?;
+    let mut versions = Vec::new();
+
+    for entry in fs::read_dir(&root).map_err(|e| e.to_string())? {
+        let entry = entry.map_err(|e| e.to_string())?;
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+
+        let Some(name) = path.file_name().map(|value| value.to_string_lossy().to_string()) else {
+            continue;
+        };
+
+        if name.eq_ignore_ascii_case("current") || !name.starts_with("node-v") {
+            continue;
+        }
+
+        let version = name.trim_start_matches("node-v").to_string();
+        if !path.join("node.exe").exists() {
+            continue;
+        }
+
+        versions.push(NodeVersionState {
+            version: version.clone(),
+            installed: true,
+            active: active.as_deref() == Some(version.as_str()),
+            path: path.to_string_lossy().replace("\\", "/"),
+        });
+    }
+
+    versions.sort_by(|a, b| b.version.cmp(&a.version));
+    Ok(versions)
+}
+
+#[tauri::command]
+fn activate_node_version(base_dir: String, version: String) -> Result<String, String> {
+    #[cfg(target_os = "windows")]
+    {
+    let normalized = normalize_node_version_tag(&version)?;
+    let root = node_root_dir(&base_dir);
+    fs::create_dir_all(&root).map_err(|e| e.to_string())?;
+
+    let target_dir = node_version_dir(&base_dir, &normalized);
+    if !target_dir.join("node.exe").exists() {
+        return Err(format!("Node {} is not installed", normalized));
+    }
+
+    let current_dir = node_current_dir(&base_dir);
+    let script = format!(
+        r#"
+$current = '{current}'
+$target = '{target}'
+
+if (Test-Path -LiteralPath $current) {{
+    $item = Get-Item -LiteralPath $current -Force
+    if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {{
+        cmd /c rmdir "$current" | Out-Null
+    }} else {{
+        Remove-Item -LiteralPath $current -Force -Recurse
+    }}
+}}
+
+New-Item -ItemType Junction -Path $current -Target $target | Out-Null
+Write-Output $current
+"#,
+        current = current_dir.to_string_lossy().replace('\'', "''"),
+        target = target_dir.to_string_lossy().replace('\'', "''"),
+    );
+
+    let output = run_hidden_powershell(&script)?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(if stderr.is_empty() {
+            format!("Failed to activate Node {}", normalized)
+        } else {
+            stderr
+        });
+    }
+
+    Ok(current_dir.to_string_lossy().replace("\\", "/"))
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = base_dir;
+        let _ = version;
+        Err("Node version switching is currently only supported on Windows".into())
+    }
+}
+
+#[tauri::command]
+fn deactivate_node_version(base_dir: String) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        let current_dir = node_current_dir(&base_dir);
+        if !current_dir.exists() {
+            return Ok(());
+        }
+
+        let script = format!(
+            r#"
+$current = '{current}'
+
+if (Test-Path -LiteralPath $current) {{
+    $item = Get-Item -LiteralPath $current -Force
+    if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {{
+        cmd /c rmdir "$current" | Out-Null
+    }} else {{
+        Remove-Item -LiteralPath $current -Force -Recurse
+    }}
+}}
+"#,
+            current = current_dir.to_string_lossy().replace('\'', "''"),
+        );
+
+        let output = run_hidden_powershell(&script)?;
+        if output.status.success() {
+            Ok(())
+        } else {
+            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+            Err(if stderr.is_empty() {
+                "Failed to deactivate current Node version".into()
+            } else {
+                stderr
+            })
+        }
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = base_dir;
+        Err("Node version switching is currently only supported on Windows".into())
+    }
 }
 
 #[tauri::command]
@@ -2355,12 +2546,7 @@ pub fn run() {
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
             pending_update: Mutex::new(None),
         })
-        .setup(|app| {
-            #[cfg(not(any(target_os = "android", target_os = "ios")))]
-            app.handle().plugin(tauri_plugin_updater::Builder::new().build())?;
-
-            Ok(())
-        })
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_os::init())
@@ -2379,6 +2565,9 @@ pub fn run() {
             check_ports_status,
             path_exists,
             list_subdirs,
+            list_node_versions,
+            activate_node_version,
+            deactivate_node_version,
             detect_install_base_dir,
             ensure_devstack_layout,
             ensure_install_marker,

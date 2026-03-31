@@ -45,7 +45,7 @@ jobs:
         with:
           tagName: ${{ github.ref_name }}
           releaseName: DevStack ${{ github.ref_name }}
-          releaseDraft: true
+          releaseDraft: false
           prerelease: false
           includeUpdaterJson: true
           generateReleaseNotes: true

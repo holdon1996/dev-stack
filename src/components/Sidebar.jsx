@@ -1,6 +1,6 @@
 import React from 'react';
 import { useStore } from '../store';
-import { Layout, Globe, Database, Code, FileText, Settings, Radio, FileCode, Server } from 'lucide-react';
+import { Layout, Globe, Database, Code, FileText, Settings, Radio, FileCode, Server, Boxes } from 'lucide-react';
 
 const Sidebar = () => {
   const { activePage, setActivePage, systemStats, t } = useStore();
@@ -11,6 +11,7 @@ const Sidebar = () => {
     { id: 'apache', label: t('apache'), icon: Server },
     { id: 'database', label: t('database'), icon: Database },
     { id: 'php', label: t('phpRuntime'), icon: Code },
+    { id: 'node', label: t('nodeRuntime'), icon: Boxes },
     { id: 'tunnels', label: t('tunnels'), icon: Radio },
     { id: 'logs', label: t('logs'), icon: FileText },
   ];

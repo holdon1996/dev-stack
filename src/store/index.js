@@ -8,6 +8,7 @@ import { createApacheSlice } from './apacheSlice';
 import { createTunnelSlice } from './tunnelSlice';
 import { createUiSlice } from './uiSlice';
 import { createRedisSlice } from './redisSlice';
+import { createNodeSlice } from './nodeSlice';
 
 export const useStore = create(
     persist(
@@ -20,6 +21,7 @@ export const useStore = create(
             ...createTunnelSlice(...a),
             ...createUiSlice(...a),
             ...createRedisSlice(...a),
+            ...createNodeSlice(...a),
         }),
         {
             name: 'devstack-storage-v3',

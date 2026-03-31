@@ -134,6 +134,27 @@ const PageSettings = () => {
     ? Math.min(100, Math.round((appUpdate.downloadedBytes / appUpdate.totalBytes) * 100))
     : 0;
 
+  const formatReleaseDate = (value) => {
+    if (!value) return '';
+
+    const direct = new Date(value);
+    if (!Number.isNaN(direct.getTime())) {
+      return direct.toLocaleString();
+    }
+
+    const normalized = value
+      .replace(' +00:00:00', 'Z')
+      .replace(/ (\+|-)(\d{2}):(\d{2}):(\d{2})$/, (_, sign, hh, mm) => `${sign}${hh}:${mm}`);
+    const parsed = new Date(normalized);
+    if (!Number.isNaN(parsed.getTime())) {
+      return parsed.toLocaleString();
+    }
+
+    return '';
+  };
+
+  const publishedAtLabel = formatReleaseDate(appUpdate.publishedAt);
+
   return (
     <div className="flex-1 flex flex-col overflow-y-auto">
       <div className="px-6 py-5 border-b border-[#1a1c22] bg-bg flex items-center">
@@ -249,9 +270,9 @@ const PageSettings = () => {
             ) : null}
           </div>
 
-          {appUpdate.publishedAt ? (
+          {publishedAtLabel ? (
             <div className="text-[12px] text-textDim">
-              {t('releasePublished')}: {new Date(appUpdate.publishedAt).toLocaleString()}
+              {t('releasePublished')}: {publishedAtLabel}
             </div>
           ) : null}
 
