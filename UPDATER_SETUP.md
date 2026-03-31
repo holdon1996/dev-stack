@@ -225,6 +225,20 @@ Cập nhật version trước:
 
 Nên để cùng một version, ví dụ `1.0.1`.
 
+Bạn có thể sửa tay hoặc dùng script bump version:
+
+[`bump-version.ps1`](/f:/dev-stack/scripts/bump-version.ps1)
+
+```powershell
+npm run version:bump -- 1.0.1
+```
+
+Script này sẽ cập nhật đồng bộ:
+
+- [`package.json`](/f:/dev-stack/package.json)
+- [`src-tauri/Cargo.toml`](/f:/dev-stack/src-tauri/Cargo.toml)
+- [`src-tauri/tauri.conf.json`](/f:/dev-stack/src-tauri/tauri.conf.json)
+
 Sau đó tạo tag:
 
 ```powershell
