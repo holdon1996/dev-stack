@@ -116,6 +116,13 @@ const translations = {
     nodeUninstalledToast: 'Node.js {version} uninstalled.',
     nodeUninstallFailed: 'Could not uninstall Node.js: {error}',
     uninstallNodeConfirm: 'Uninstall Node.js {version}?',
+    nodeGlobalPriority: 'Global Node priority',
+    nodeGlobalPriorityOk: 'New terminals already resolve Node.js from DevStack first.',
+    nodeGlobalPriorityHint: 'Your machine is still resolving Node.js from another install. Put DevStack Node at the top of your user PATH to make it the default everywhere.',
+    nodeUseGlobally: 'Use globally',
+    nodeGlobalPathUpdated: 'DevStack Node was added to the top of your user PATH. Open a new terminal to apply it.',
+    nodeGlobalPathFailed: 'Could not update Node PATH: {error}',
+    nodeCurrentPathUnknown: 'Node.js path has not been resolved yet.',
 
     // Tunnels
     tunnelsTitle: 'Tunnels',
@@ -522,6 +529,13 @@ const translations = {
     nodeUninstalledToast: 'Đã gỡ Node.js {version}.',
     nodeUninstallFailed: 'Không thể gỡ Node.js: {error}',
     uninstallNodeConfirm: 'Gỡ cài đặt Node.js {version}?',
+    nodeGlobalPriority: 'Ưu tiên Node toàn cục',
+    nodeGlobalPriorityOk: 'Các terminal mới đã ưu tiên Node.js từ DevStack.',
+    nodeGlobalPriorityHint: 'Máy bạn vẫn đang resolve Node.js từ bản cài khác. Hãy đưa DevStack Node lên đầu User PATH để nó thành mặc định ở mọi terminal mới.',
+    nodeUseGlobally: 'Dùng toàn cục',
+    nodeGlobalPathUpdated: 'Đã đưa DevStack Node lên đầu User PATH. Hãy mở terminal mới để áp dụng.',
+    nodeGlobalPathFailed: 'Không thể cập nhật PATH cho Node: {error}',
+    nodeCurrentPathUnknown: 'Chưa xác định được đường dẫn Node.js hiện tại.',
 
     // Tunnels
     tunnelsTitle: 'Đường hầm',

@@ -1313,6 +1313,129 @@ if (Test-Path -LiteralPath $current) {{
     }
 }
 
+#[derive(Debug, Serialize)]
+struct NodePathStatus {
+    current_node_path: Option<String>,
+    all_node_paths: Vec<String>,
+    devstack_first: bool,
+    user_path_contains_devstack: bool,
+}
+
+#[tauri::command]
+fn get_node_path_status(base_dir: String) -> Result<NodePathStatus, String> {
+    #[cfg(target_os = "windows")]
+    {
+        let devstack_current = node_current_dir(&base_dir)
+            .to_string_lossy()
+            .replace("/", "\\")
+            .trim_end_matches('\\')
+            .to_string();
+
+        let output = run_hidden_powershell(
+            r#"
+$cmd = Get-Command node -All -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source -Unique
+if ($cmd) {
+    $cmd | ForEach-Object { Write-Output $_ }
+}
+"#,
+        )?;
+
+        if !output.status.success() {
+            return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
+        }
+
+        let paths = String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .map(|line| line.trim().replace("/", "\\"))
+            .filter(|line| !line.is_empty())
+            .collect::<Vec<_>>();
+
+        let current_node_path = paths.first().cloned();
+        let devstack_prefix = format!("{}\\node.exe", devstack_current);
+        let devstack_first = current_node_path
+            .as_ref()
+            .map(|path| path.eq_ignore_ascii_case(&devstack_prefix))
+            .unwrap_or(false);
+
+        let user_path = std::env::var("PATH").unwrap_or_default();
+        let user_path_contains_devstack = user_path
+            .split(';')
+            .map(|part| part.trim().replace("/", "\\").trim_end_matches('\\').to_string())
+            .any(|part| part.eq_ignore_ascii_case(&devstack_current));
+
+        Ok(NodePathStatus {
+            current_node_path,
+            all_node_paths: paths,
+            devstack_first,
+            user_path_contains_devstack,
+        })
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = base_dir;
+        Err("Global Node PATH management is currently only supported on Windows".into())
+    }
+}
+
+#[tauri::command]
+fn set_node_global_path(base_dir: String) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        let devstack_current = node_current_dir(&base_dir);
+        if !devstack_current.join("node.exe").exists() {
+            return Err("No active DevStack Node version found. Activate a Node version first.".into());
+        }
+
+        let target = devstack_current
+            .to_string_lossy()
+            .replace("/", "\\")
+            .trim_end_matches('\\')
+            .to_string();
+        let escaped = target.replace('\'', "''");
+
+        let script = format!(
+            r#"
+$target = '{target}'
+$normalizedTarget = $target.ToLowerInvariant().TrimEnd('\')
+$existing = [Environment]::GetEnvironmentVariable('Path', 'User')
+$parts = @()
+
+if ($existing) {{
+    $parts = $existing -split ';' | Where-Object {{
+        $_ -and ($_.Trim() -ne '')
+    }} | ForEach-Object {{
+        $_.Trim()
+    }} | Where-Object {{
+        ($_.ToLowerInvariant().Replace('/','\').TrimEnd('\')) -ne $normalizedTarget
+    }}
+}}
+
+$newParts = @($target) + $parts
+$newPath = ($newParts -join ';').Trim(';')
+[Environment]::SetEnvironmentVariable('Path', $newPath, 'User')
+"#,
+            target = escaped
+        );
+
+        let output = run_hidden_powershell(&script)?;
+        if output.status.success() {
+            Ok(())
+        } else {
+            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+            Err(if stderr.is_empty() {
+                "Failed to update User PATH for Node.js".into()
+            } else {
+                stderr
+            })
+        }
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = base_dir;
+        Err("Global Node PATH management is currently only supported on Windows".into())
+    }
+}
+
 #[tauri::command]
 fn detect_install_base_dir() -> Result<Option<String>, String> {
     detect_install_base_dir_internal()
@@ -2568,6 +2691,8 @@ pub fn run() {
             list_node_versions,
             activate_node_version,
             deactivate_node_version,
+            get_node_path_status,
+            set_node_global_path,
             detect_install_base_dir,
             ensure_devstack_layout,
             ensure_install_marker,

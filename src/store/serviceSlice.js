@@ -441,7 +441,7 @@ export const createServiceSlice = (set, get) => ({
         // but start it detached.
         await invoke('start_detached_process', {
             executable: 'cmd.exe',
-            args: ['/C', 'start', 'cmd.exe', '/K', `${nodePathPrefix}cd /d "${targetPath}" && title DevStack Terminal`]
+            args: ['/C', 'start', '""', 'cmd.exe', '/K', `title DevStack Terminal && ${nodePathPrefix}cd /d "${targetPath}"`]
         });
     },
 

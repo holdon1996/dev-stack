@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { ask } from '@tauri-apps/plugin-dialog';
-import { Boxes, Download, Loader, RefreshCw, Terminal, Trash2 } from 'lucide-react';
+import { Boxes, Download, Loader, RefreshCw, Trash2, Globe } from 'lucide-react';
 import { useStore } from '../store';
 
 const PageNode = () => {
@@ -8,13 +8,15 @@ const PageNode = () => {
     nodeVersions,
     nodeInstallLogs,
     nodeInstallProgress,
+    nodePathStatus,
     activatingNode,
     settings,
     scanInstalledNode,
     installNodeVersion,
     setActiveNode,
     uninstallNodeVersion,
-    openNodeTerminal,
+    setNodeGlobalPath,
+    refreshNodePathStatus,
     showToast,
     t,
   } = useStore();
@@ -56,16 +58,35 @@ const PageNode = () => {
         >
           <RefreshCw size={14} /> {t('refresh')}
         </button>
-
-        <button
-          className="btn-primary flex items-center gap-2 px-4 py-2 text-[12px] h-[42px]"
-          onClick={() => openNodeTerminal()}
-        >
-          <Terminal size={14} /> {t('openNodeTerminal')}
-        </button>
       </div>
 
       <div className="flex-1 overflow-y-auto p-6 flex flex-col gap-5">
+        <div className={`border rounded-[28px] p-6 ${nodePathStatus.devstackFirst ? 'bg-accent/5 border-accent/30' : 'bg-warn/5 border-warn/30'}`}>
+          <div className="flex items-start justify-between gap-4 flex-wrap">
+            <div className="flex-1 min-w-[320px]">
+              <div className="text-[13px] font-bold uppercase tracking-wider flex items-center gap-2">
+                <Globe size={14} className={nodePathStatus.devstackFirst ? 'text-accent' : 'text-warn'} />
+                {t('nodeGlobalPriority')}
+              </div>
+              <div className="text-[12px] text-textDim mt-2">
+                {nodePathStatus.devstackFirst ? t('nodeGlobalPriorityOk') : t('nodeGlobalPriorityHint')}
+              </div>
+              <div className="mt-3 text-[11px] text-muted font-mono break-all">
+                {nodePathStatus.currentNodePath || t('nodeCurrentPathUnknown')}
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button className="btn-ghost flex items-center gap-2" onClick={refreshNodePathStatus}>
+                <RefreshCw size={14} /> {t('refresh')}
+              </button>
+              <button className="btn-primary flex items-center gap-2" onClick={setNodeGlobalPath}>
+                <Globe size={14} /> {t('nodeUseGlobally')}
+              </button>
+            </div>
+          </div>
+        </div>
+
         <div className="bg-surface border border-border/40 shadow-liquid rounded-[28px] p-6">
           <div className="flex items-center justify-between gap-4 flex-wrap">
             <div>

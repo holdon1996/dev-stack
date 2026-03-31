@@ -3,6 +3,12 @@ export const createNodeSlice = (set, get) => ({
     nodeInstallLogs: [],
     nodeInstallProgress: { pct: 0, downloaded: 0, total: 0 },
     activatingNode: null,
+    nodePathStatus: {
+        currentNodePath: '',
+        allNodePaths: [],
+        devstackFirst: false,
+        userPathContainsDevstack: false,
+    },
 
     normalizeNodeTag: (tag) => {
         const normalized = `${tag || ''}`.trim().replace(/^v/i, '');
@@ -19,8 +25,27 @@ export const createNodeSlice = (set, get) => ({
             const normalized = Array.isArray(versions) ? versions : [];
             normalized.sort((a, b) => b.version.localeCompare(a.version, undefined, { numeric: true, sensitivity: 'base' }));
             set({ nodeVersions: normalized });
+            await get().refreshNodePathStatus();
         } catch (e) {
             console.error('scanInstalledNode failed:', e);
+        }
+    },
+
+    refreshNodePathStatus: async () => {
+        try {
+            const { invoke } = await import('@tauri-apps/api/core');
+            const baseDir = get().settings.devStackDir.replace(/[\\\/]+$/, '');
+            const status = await invoke('get_node_path_status', { baseDir });
+            set({
+                nodePathStatus: {
+                    currentNodePath: status.current_node_path || '',
+                    allNodePaths: status.all_node_paths || [],
+                    devstackFirst: !!status.devstack_first,
+                    userPathContainsDevstack: !!status.user_path_contains_devstack,
+                }
+            });
+        } catch (e) {
+            console.error('refreshNodePathStatus failed:', e);
         }
     },
 
@@ -117,6 +142,7 @@ export const createNodeSlice = (set, get) => ({
             const baseDir = get().settings.devStackDir.replace(/[\\\/]+$/, '');
             await invoke('activate_node_version', { baseDir, version });
             await get().scanInstalledNode();
+            await get().refreshNodePathStatus();
             if (!options.silent) {
                 get().showToast(get().t('nodeActivatedToast', { version }), 'ok');
             }
@@ -146,6 +172,7 @@ export const createNodeSlice = (set, get) => ({
             }
             await invoke('remove_dir', { path: targetDir.replace(/\//g, '\\') });
             await get().scanInstalledNode();
+            await get().refreshNodePathStatus();
             get().showToast(get().t('nodeUninstalledToast', { version }), 'warn');
         } catch (e) {
             console.error('uninstallNodeVersion failed:', e);
@@ -153,25 +180,16 @@ export const createNodeSlice = (set, get) => ({
         }
     },
 
-    openNodeTerminal: async (prjPath = '') => {
-        const activeNode = get().nodeVersions.find(v => v.active);
-        if (!activeNode) {
-            get().showToast(get().t('nodeNoActiveVersion'), 'warn');
-            return;
-        }
-
-        const targetPath = (prjPath || get().settings.rootPath || get().settings.devStackDir || 'C:/devstack').replace(/\//g, '\\');
-        const currentNodePath = `${get().settings.devStackDir.replace(/\//g, '\\')}\\bin\\node\\current`;
-
+    setNodeGlobalPath: async () => {
         try {
             const { invoke } = await import('@tauri-apps/api/core');
-            await invoke('start_detached_process', {
-                executable: 'cmd.exe',
-                args: ['/C', 'start', 'cmd.exe', '/K', `set "PATH=${currentNodePath};%PATH%" && cd /d "${targetPath}" && title DevStack Node v${activeNode.version}`]
-            });
+            const baseDir = get().settings.devStackDir.replace(/[\\\/]+$/, '');
+            await invoke('set_node_global_path', { baseDir });
+            await get().refreshNodePathStatus();
+            get().showToast(get().t('nodeGlobalPathUpdated'), 'ok');
         } catch (e) {
-            console.error('openNodeTerminal failed:', e);
-            get().showToast(get().t('nodeTerminalFailed', { error: `${e}` }), 'danger');
+            console.error('setNodeGlobalPath failed:', e);
+            get().showToast(get().t('nodeGlobalPathFailed', { error: `${e}` }), 'danger');
         }
     },
 });
