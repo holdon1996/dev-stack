@@ -101,10 +101,10 @@ function App() {
         <div className="w-16" />
       </div>
 
-      <div className="flex-1 flex overflow-hidden">
+      <div className="flex-1 min-h-0 flex overflow-hidden">
         <Sidebar />
 
-        <main className="flex-1 flex flex-col bg-[#13151a] overflow-hidden">
+        <main className="flex-1 min-h-0 flex flex-col bg-[#13151a] overflow-hidden">
           {activePage === 'services' && <PageServices />}
           {activePage === 'sites' && <PageSites />}
           {activePage === 'database' && <PageDatabase />}

@@ -4619,7 +4619,7 @@ dependencies = [
 
 [[package]]
 name = "tauri-app"
-version = "1.0.5"
+version = "1.0.6"
 dependencies = [
  "base64 0.22.1",
  "futures-util",
@@ -4641,6 +4641,7 @@ dependencies = [
  "tauri-plugin-updater",
  "tokio",
  "windows-sys 0.59.0",
+ "winreg 0.55.0",
  "zip 8.4.0",
  "zip-extract",
 ]

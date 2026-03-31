@@ -78,16 +78,19 @@ export const createNodeSlice = (set, get) => ({
             nodeInstallProgress: { pct: 0, downloaded: 0, total: 0 }
         }));
 
+        let unlistenLogs = null;
+        let unlistenProgress = null;
+
         try {
             const { invoke } = await import('@tauri-apps/api/core');
             const { listen } = await import('@tauri-apps/api/event');
 
-            const unlistenLogs = await listen('node-install-log', (event) => {
+            unlistenLogs = await listen('node-install-log', (event) => {
                 const line = event.payload;
                 set(s => ({ nodeInstallLogs: [...s.nodeInstallLogs, { t: new Date().toLocaleTimeString(), m: line, l: 'info' }] }));
             });
 
-            const unlistenProgress = await listen('download-progress', (event) => {
+            unlistenProgress = await listen('download-progress', (event) => {
                 const { svcType, pct, downloaded, total } = event.payload || {};
                 if (svcType === 'node') {
                     set({
@@ -108,10 +111,15 @@ export const createNodeSlice = (set, get) => ({
                 expectedSizeMb: null
             });
 
-            unlistenLogs();
-            unlistenProgress();
-
             if (result === 'SUCCESS') {
+                set(s => ({
+                    nodeInstallProgress: {
+                        pct: 100,
+                        downloaded: s.nodeInstallProgress.total || s.nodeInstallProgress.downloaded,
+                        total: s.nodeInstallProgress.total || s.nodeInstallProgress.downloaded
+                    },
+                    nodeInstallLogs: [...s.nodeInstallLogs, { t: new Date().toLocaleTimeString(), m: 'Progress complete.', l: 'info' }]
+                }));
                 await get().scanInstalledNode();
                 const activeNode = get().nodeVersions.find(v => v.active);
                 if (!activeNode) {
@@ -128,6 +136,13 @@ export const createNodeSlice = (set, get) => ({
                 nodeInstallLogs: [...s.nodeInstallLogs, { t: new Date().toLocaleTimeString(), m: `Error: ${e}`, l: 'err' }]
             }));
             get().showToast(get().t('nodeInstallFailed', { error: `${e}` }), 'danger');
+        } finally {
+            if (typeof unlistenLogs === 'function') {
+                unlistenLogs();
+            }
+            if (typeof unlistenProgress === 'function') {
+                unlistenProgress();
+            }
         }
     },
 

@@ -22,7 +22,7 @@ const Sidebar = () => {
   const ramPct = systemStats.ramTotal ? Math.round((systemStats.ram / systemStats.ramTotal) * 100) : 0;
 
   return (
-    <div className="w-[200px] bg-bg border-r border-[#1a1c22] flex flex-col p-4 pt-4 gap-0.5 flex-shrink-0">
+    <div className="w-[200px] min-h-0 overflow-hidden bg-bg border-r border-[#1a1c22] flex flex-col p-4 pt-4 gap-0.5 flex-shrink-0">
       <div className="px-3 pb-5">
         <div className="text-xl font-extrabold tracking-tighter text-text">
           dev<span className="text-accent">stack</span>
@@ -30,7 +30,7 @@ const Sidebar = () => {
         <div className="text-[10px] text-muted font-mono mt-0.5">v1.0.0</div>
       </div>
 
-      <nav className="flex flex-col gap-0.5 flex-1">
+      <nav className="flex flex-col gap-0.5 flex-1 min-h-0 overflow-y-auto overflow-x-hidden pr-1">
         {navItems.map((item) => {
           const Icon = item.icon;
           return (
@@ -80,7 +80,7 @@ const Sidebar = () => {
       </nav>
 
       {/* System Status Bar */}
-      <div className="p-3.5 bg-surface rounded-xl mt-auto">
+      <div className="p-3.5 bg-surface rounded-xl mt-4 flex-shrink-0">
         <div className="text-[10px] text-muted font-bold tracking-widest uppercase mb-2.5">{t('system')}</div>
         <div className="mb-2">
           <div className="flex justify-between text-[11px] mb-1">
