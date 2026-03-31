@@ -5,6 +5,18 @@
 </p>
 
 <p align="center">
+  <a href="https://github.com/holdon1996/dev-stack/releases/latest">
+    <img src="https://img.shields.io/badge/Download-Latest%20Release-00c853?style=for-the-badge" alt="Download Latest Release">
+  </a>
+  <a href="https://github.com/holdon1996/dev-stack#quick-start">
+    <img src="https://img.shields.io/badge/How%20to%20Install-Quick%20Start-1f6feb?style=for-the-badge" alt="How to Install">
+  </a>
+  <a href="https://github.com/holdon1996/dev-stack/blob/main/UPDATER_SETUP.md">
+    <img src="https://img.shields.io/badge/Updater-Setup%20Guide-f5a623?style=for-the-badge" alt="Updater Setup Guide">
+  </a>
+</p>
+
+<p align="center">
   <a href="https://github.com/holdon1996/dev-stack/releases">
     <img src="https://img.shields.io/github/v/release/holdon1996/dev-stack?display_name=tag&style=for-the-badge" alt="Release">
   </a>
@@ -77,6 +89,12 @@ scripts/             Local helper scripts
 ```
 
 ## Quick Start
+
+Want to install DevStack quickly?
+
+- Download the latest packaged build from [Releases](https://github.com/holdon1996/dev-stack/releases/latest)
+- Run the `.exe` or `.msi` installer
+- Open DevStack and configure your paths, ports, and local services in `Settings`
 
 ### Prerequisites
 
