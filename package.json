@@ -8,7 +8,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "tauri": "tauri",
-    "version:bump": "powershell -ExecutionPolicy Bypass -File .\\scripts\\bump-version.ps1"
+    "version:bump": "powershell -ExecutionPolicy Bypass -File .\\scripts\\bump-version.ps1",
+    "version:release": "powershell -ExecutionPolicy Bypass -File .\\scripts\\release-version.ps1"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.90.21",

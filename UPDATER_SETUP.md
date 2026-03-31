@@ -239,7 +239,31 @@ Script này sẽ cập nhật đồng bộ:
 - [`src-tauri/Cargo.toml`](/f:/dev-stack/src-tauri/Cargo.toml)
 - [`src-tauri/tauri.conf.json`](/f:/dev-stack/src-tauri/tauri.conf.json)
 
-Sau đó tạo tag:
+Nếu muốn chạy luôn cả flow release:
+
+[`release-version.ps1`](/f:/dev-stack/scripts/release-version.ps1)
+
+```powershell
+npm run version:release -- 1.0.2
+```
+
+Lệnh này sẽ:
+
+- bump version
+- commit 3 file version
+- push `main`
+- tạo tag `v1.0.2`
+- push tag để GitHub Actions chạy
+
+Mặc định script sẽ từ chối chạy nếu ngoài 3 file version còn có thay đổi khác trong repo.
+
+Nếu bạn muốn gom luôn cả code changes hiện tại vào release commit, chạy trực tiếp PowerShell:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\release-version.ps1 -Version 1.0.2 -StageAll
+```
+
+Nếu không dùng script release thì tạo tag thủ công:
 
 ```powershell
 git add .

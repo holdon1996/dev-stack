@@ -1,4 +1,4 @@
-﻿[package]
+[package]
 name = "tauri-app"
 version = "1.0.1"
 description = "A Tauri App"
