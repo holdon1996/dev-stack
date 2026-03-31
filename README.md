@@ -15,8 +15,8 @@
   <a href="https://github.com/holdon1996/dev-stack#quick-start">
     <img src="https://img.shields.io/badge/How%20to%20Install-Quick%20Start-1f6feb?style=for-the-badge" alt="How to Install">
   </a>
-  <a href="https://github.com/holdon1996/dev-stack/blob/main/UPDATER_SETUP.md">
-    <img src="https://img.shields.io/badge/Updater-Setup%20Guide-f5a623?style=for-the-badge" alt="Updater Setup Guide">
+  <a href="https://github.com/holdon1996/dev-stack/releases">
+    <img src="https://img.shields.io/badge/See-All%20Releases-f5a623?style=for-the-badge" alt="See All Releases">
   </a>
 </p>
 
@@ -124,7 +124,6 @@ npm run tauri build
 Updater and release signing are already wired into the app and workflow.
 
 - Release workflow: [.github/workflows/release.yml](/f:/dev-stack/.github/workflows/release.yml)
-- Updater setup guide: [UPDATER_SETUP.md](/f:/dev-stack/UPDATER_SETUP.md)
 - Local env helper: [scripts/set-updater-env.ps1](/f:/dev-stack/scripts/set-updater-env.ps1)
 
 If the repository is private, GitHub-hosted updater assets will not be publicly downloadable by end users. For the current updater URL strategy, the repository should be public or served through a separate update endpoint.
