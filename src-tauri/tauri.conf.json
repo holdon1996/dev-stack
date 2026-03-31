@@ -51,6 +51,10 @@
     "shell": {},
     "fs": {},
     "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDIwMEI4NDcyNzY2OTMwQ0MKUldUTU1HbDJjb1FMSUNpSmsrZzdGL3hjSDVpaGgwSTFWS3VnclB4ZGR5YTdrYW1CTElWekpPSzQK",
+      "endpoints": [
+        "https://github.com/holdon1996/dev-stack/releases/latest/download/latest.json"
+      ],
       "windows": {
         "installMode": "passive"
       }
