@@ -17,19 +17,17 @@ if (-not (Test-Path -LiteralPath $packageJsonPath)) { throw "Missing file: $pack
 if (-not (Test-Path -LiteralPath $cargoTomlPath)) { throw "Missing file: $cargoTomlPath" }
 if (-not (Test-Path -LiteralPath $tauriConfPath)) { throw "Missing file: $tauriConfPath" }
 
-$packageJson = Get-Content -LiteralPath $packageJsonPath -Raw | ConvertFrom-Json
-$packageJson.version = $Version
-$packageJsonJson = $packageJson | ConvertTo-Json -Depth 100
-[System.IO.File]::WriteAllText($packageJsonPath, $packageJsonJson, [System.Text.UTF8Encoding]::new($false))
+$packageJson = Get-Content -LiteralPath $packageJsonPath -Raw
+$packageJson = [regex]::Replace($packageJson, '(?m)^(\s*"version"\s*:\s*")[^"]+(")', "`$1$Version`$2", 1)
+[System.IO.File]::WriteAllText($packageJsonPath, $packageJson, [System.Text.UTF8Encoding]::new($false))
 
 $cargoToml = Get-Content -LiteralPath $cargoTomlPath -Raw
 $cargoToml = [regex]::Replace($cargoToml, '(?m)^version\s*=\s*"[^"]+"$', "version = `"$Version`"", 1)
 [System.IO.File]::WriteAllText($cargoTomlPath, $cargoToml, [System.Text.UTF8Encoding]::new($false))
 
-$tauriConf = Get-Content -LiteralPath $tauriConfPath -Raw | ConvertFrom-Json
-$tauriConf.version = $Version
-$tauriConfJson = $tauriConf | ConvertTo-Json -Depth 100
-[System.IO.File]::WriteAllText($tauriConfPath, $tauriConfJson, [System.Text.UTF8Encoding]::new($false))
+$tauriConf = Get-Content -LiteralPath $tauriConfPath -Raw
+$tauriConf = [regex]::Replace($tauriConf, '(?m)^(\s*"version"\s*:\s*")[^"]+(")', "`$1$Version`$2", 1)
+[System.IO.File]::WriteAllText($tauriConfPath, $tauriConf, [System.Text.UTF8Encoding]::new($false))
 
 Write-Host "Updated version to $Version in:" -ForegroundColor Green
 Write-Host "- $packageJsonPath"
