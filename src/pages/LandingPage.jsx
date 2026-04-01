@@ -1,5 +1,4 @@
 import React from "react";
-import appIcon from "../../src-tauri/icons/icon.png";
 
 const features = [
   {
@@ -30,7 +29,7 @@ function LandingPage() {
         <header className="flex flex-col gap-5 border-b border-white/10 pb-6 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center gap-4">
             <div className="flex h-14 w-14 items-center justify-center rounded-2xl border border-emerald-400/30 bg-white/5 shadow-[0_0_30px_rgba(0,229,160,0.18)]">
-              <img src={appIcon} alt="DevStack icon" className="h-10 w-10" />
+              <img src="./devstack-preview.png" alt="DevStack icon" className="h-10 w-10 rounded-[10px]" />
             </div>
             <div>
               <div className="font-mono text-xs uppercase tracking-[0.32em] text-emerald-300/80">DevStack</div>
