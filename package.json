@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "build:pages": "vite build",
     "preview": "vite preview",
     "tauri": "tauri",
     "version:bump": "powershell -ExecutionPolicy Bypass -File .\\scripts\\bump-version.ps1",

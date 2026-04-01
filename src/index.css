@@ -12,9 +12,18 @@
     font-family: 'Syne', sans-serif;
     margin: 0;
     padding: 0;
+    min-height: 100vh;
+    background-image: radial-gradient(circle at 50% 0%, rgba(0, 229, 160, 0.03) 0%, transparent 50%);
+  }
+
+  body[data-shell='tauri'] {
     overflow: hidden;
     height: 100vh;
-    background-image: radial-gradient(circle at 50% 0%, rgba(0, 229, 160, 0.03) 0%, transparent 50%);
+  }
+
+  body[data-shell='web'] {
+    overflow-x: hidden;
+    overflow-y: auto;
   }
 
   ::-webkit-scrollbar {
