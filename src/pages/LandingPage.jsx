@@ -28,8 +28,8 @@ function LandingPage() {
       <div className="mx-auto flex min-h-screen w-full max-w-7xl flex-col px-6 py-8 sm:px-10 lg:px-12">
         <header className="flex flex-col gap-5 border-b border-white/10 pb-6 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center gap-4">
-            <div className="flex h-14 w-14 items-center justify-center rounded-2xl border border-emerald-400/30 bg-white/5 shadow-[0_0_30px_rgba(0,229,160,0.18)]">
-              <img src="./devstack-preview.png" alt="DevStack icon" className="h-10 w-10 rounded-[10px]" />
+            <div className="flex h-14 w-14 items-center justify-center rounded-2xl border border-emerald-400/30 bg-white/5 shadow-[0_0_1.875rem_rgba(0,229,160,0.18)]">
+              <img src="./devstack-preview.png" alt="DevStack icon" className="h-10 w-10 rounded-[.625rem]" />
             </div>
             <div>
               <div className="font-mono text-xs uppercase tracking-[0.32em] text-emerald-300/80">DevStack</div>
@@ -67,7 +67,7 @@ function LandingPage() {
               <div className="mt-8 flex flex-wrap gap-4">
                 <a
                   href="https://github.com/holdon1996/dev-stack/releases/latest"
-                  className="rounded-2xl border border-emerald-300/25 bg-emerald-300 px-6 py-3 font-semibold text-slate-950 shadow-[0_18px_50px_rgba(0,229,160,0.2)] transition hover:-translate-y-0.5 hover:bg-emerald-200"
+                  className="rounded-2xl border border-emerald-300/25 bg-emerald-300 px-6 py-3 font-semibold text-slate-950 shadow-[0_1.125rem_3.125rem_rgba(0,229,160,0.2)] transition hover:-translate-y-0.5 hover:bg-emerald-200"
                 >
                   Tải bản phát hành mới nhất
                 </a>
@@ -81,8 +81,8 @@ function LandingPage() {
             </div>
 
             <div className="relative">
-              <div className="absolute inset-0 rounded-[32px] bg-emerald-300/10 blur-3xl" />
-              <div className="relative overflow-hidden rounded-[32px] border border-white/10 bg-slate-950/70 p-6 shadow-[0_20px_80px_rgba(0,0,0,0.45)] backdrop-blur">
+              <div className="absolute inset-0 rounded-[2rem] bg-emerald-300/10 blur-3xl" />
+              <div className="relative overflow-hidden rounded-[2rem] border border-white/10 bg-slate-950/70 p-6 shadow-[0_1.25rem_5rem_rgba(0,0,0,0.45)] backdrop-blur">
                 <div className="mb-5 flex items-center gap-2">
                   <span className="h-3 w-3 rounded-full bg-rose-400" />
                   <span className="h-3 w-3 rounded-full bg-amber-300" />
@@ -127,7 +127,7 @@ function LandingPage() {
             {features.map((feature) => (
               <article
                 key={feature.title}
-                className="rounded-[28px] border border-white/10 bg-white/5 p-6 backdrop-blur-sm transition hover:-translate-y-1 hover:border-emerald-300/30 hover:bg-white/[0.07]"
+                className="rounded-[1.75rem] border border-white/10 bg-white/5 p-6 backdrop-blur-sm transition hover:-translate-y-1 hover:border-emerald-300/30 hover:bg-white/[0.07]"
               >
                 <h2 className="text-2xl font-semibold text-white">{feature.title}</h2>
                 <p className="mt-4 text-sm leading-7 text-slate-300">{feature.description}</p>
@@ -136,19 +136,19 @@ function LandingPage() {
           </section>
 
           <section className="mt-16 grid gap-6 lg:grid-cols-[0.95fr_1.05fr]">
-            <div className="rounded-[32px] border border-white/10 bg-[#0a1110]/80 p-7">
+            <div className="rounded-[2rem] border border-white/10 bg-[#0a1110]/80 p-7">
               <div className="font-mono text-xs uppercase tracking-[0.3em] text-emerald-200/80">What you can do</div>
               <ul className="mt-6 space-y-4">
                 {sections.map((item) => (
                   <li key={item} className="flex items-start gap-3 text-slate-200">
-                    <span className="mt-2 h-2.5 w-2.5 rounded-full bg-emerald-300 shadow-[0_0_18px_rgba(0,229,160,0.8)]" />
+                    <span className="mt-2 h-2.5 w-2.5 rounded-full bg-emerald-300 shadow-[0_0_1.125rem_rgba(0,229,160,0.8)]" />
                     <span className="leading-7">{item}</span>
                   </li>
                 ))}
               </ul>
             </div>
 
-            <div className="rounded-[32px] border border-white/10 bg-white/5 p-7">
+            <div className="rounded-[2rem] border border-white/10 bg-white/5 p-7">
               <div className="font-mono text-xs uppercase tracking-[0.3em] text-slate-400">Project stack</div>
               <div className="mt-6 grid gap-4 sm:grid-cols-2">
                 {[
