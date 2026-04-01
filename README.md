@@ -9,6 +9,9 @@
 </p>
 
 <p align="center">
+  <a href="https://holdon1996.github.io/dev-stack/">
+    <img src="https://img.shields.io/badge/Live%20Site-GitHub%20Pages-0f766e?style=for-the-badge" alt="Live Site">
+  </a>
   <a href="https://github.com/holdon1996/dev-stack/releases/latest">
     <img src="https://img.shields.io/badge/Download-Latest%20Release-00c853?style=for-the-badge" alt="Download Latest Release">
   </a>
@@ -41,6 +44,8 @@
 ## Overview
 
 DevStack is a desktop tool for managing a local PHP / Apache / MySQL development stack on Windows with a fast native Rust backend.
+
+Live project page: https://holdon1996.github.io/dev-stack/
 
 It focuses on:
 
