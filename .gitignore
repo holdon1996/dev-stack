@@ -22,3 +22,15 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Local AI / debug / temp artifacts
+.agent/
+PROJECT_CONTEXT.md
+AI_CONTEXT_REFINEMENT.md
+CLAUDE.md
+debug_process.cjs
+fix_icon.ps1
+nul
+temp.zip
+temp80.zip
+test_regex.rs
