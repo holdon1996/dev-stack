@@ -1,12 +1,8 @@
 param(
-  [Parameter(Mandatory = $true)]
   [string]$Version
 )
 
 $semverPattern = '^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$'
-if ($Version -notmatch $semverPattern) {
-  throw "Invalid version '$Version'. Expected semver like 1.0.1 or 1.1.0-beta.1"
-}
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $packageJsonPath = Join-Path $repoRoot 'package.json'
@@ -16,6 +12,48 @@ $tauriConfPath = Join-Path $repoRoot 'src-tauri\tauri.conf.json'
 if (-not (Test-Path -LiteralPath $packageJsonPath)) { throw "Missing file: $packageJsonPath" }
 if (-not (Test-Path -LiteralPath $cargoTomlPath)) { throw "Missing file: $cargoTomlPath" }
 if (-not (Test-Path -LiteralPath $tauriConfPath)) { throw "Missing file: $tauriConfPath" }
+
+function Get-PackageVersion {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$Path
+  )
+
+  $packageJson = Get-Content -LiteralPath $Path -Raw
+  $match = [regex]::Match($packageJson, '(?m)^\s*"version"\s*:\s*"([^"]+)"')
+  if (-not $match.Success) {
+    throw "Could not find version field in $Path"
+  }
+
+  return $match.Groups[1].Value
+}
+
+function Get-NextPatchVersion {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$CurrentVersion
+  )
+
+  $match = [regex]::Match($CurrentVersion, '^(\d+)\.(\d+)\.(\d+)')
+  if (-not $match.Success) {
+    throw "Cannot auto-bump non-semver version '$CurrentVersion'. Pass -Version explicitly."
+  }
+
+  $major = [int]$match.Groups[1].Value
+  $minor = [int]$match.Groups[2].Value
+  $patch = [int]$match.Groups[3].Value + 1
+  return "$major.$minor.$patch"
+}
+
+if ([string]::IsNullOrWhiteSpace($Version)) {
+  $currentVersion = Get-PackageVersion -Path $packageJsonPath
+  $Version = Get-NextPatchVersion -CurrentVersion $currentVersion
+  Write-Host "Auto-bumped version: $currentVersion -> $Version" -ForegroundColor Cyan
+}
+
+if ($Version -notmatch $semverPattern) {
+  throw "Invalid version '$Version'. Expected semver like 1.0.1 or 1.1.0-beta.1"
+}
 
 $packageJson = Get-Content -LiteralPath $packageJsonPath -Raw
 $packageJsonRegex = [regex]'(?m)^(\s*"version"\s*:\s*")[^"]+(")'

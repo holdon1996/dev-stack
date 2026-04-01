@@ -1,5 +1,4 @@
 param(
-  [Parameter(Mandatory = $true)]
   [string]$Version,
   [string]$Branch = "main",
   [string]$Remote = "origin",
@@ -25,7 +24,25 @@ function Get-GitChanges {
   })
 }
 
-& (Join-Path $PSScriptRoot 'bump-version.ps1') -Version $Version
+function Get-PackageVersion {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$Path
+  )
+
+  $packageJson = Get-Content -LiteralPath $Path -Raw
+  $match = [regex]::Match($packageJson, '(?m)^\s*"version"\s*:\s*"([^"]+)"')
+  if (-not $match.Success) {
+    throw "Could not find version field in $Path"
+  }
+
+  return $match.Groups[1].Value
+}
+
+$bumpArgs = @{}
+if (-not [string]::IsNullOrWhiteSpace($Version)) {
+  $bumpArgs.Version = $Version
+}
 
 $changes = Get-GitChanges
 $extraChanges = @($changes | Where-Object { $_ -notin $allowedVersionFiles })
@@ -35,6 +52,10 @@ if (-not $StageAll -and $extraChanges.Count -gt 0) {
   $extraChanges | ForEach-Object { Write-Host "- $_" }
   throw "Refusing to create a release commit with unrelated changes. Commit them first or rerun with -StageAll."
 }
+
+& (Join-Path $PSScriptRoot 'bump-version.ps1') @bumpArgs
+
+$Version = Get-PackageVersion -Path (Join-Path $repoRoot 'package.json')
 
 if ($StageAll) {
   git add -A

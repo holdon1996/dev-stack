@@ -22,7 +22,6 @@ use tauri_plugin_updater::{Update as TauriPendingUpdate, UpdaterExt};
 #[cfg(target_os = "windows")]
 const WINDOWS_STARTUP_TASK_NAME: &str = "DevStack Startup";
 const APP_UPDATE_API_URL: &str = "https://api.github.com/repos/holdon1996/dev-stack/releases/latest";
-const APP_RELEASES_URL: &str = "https://github.com/holdon1996/dev-stack/releases";
 
 struct AppState {
     sys: Mutex<System>,
@@ -30,6 +29,16 @@ struct AppState {
     last_stats_refresh: AtomicU64,
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     pending_update: Mutex<Option<TauriPendingUpdate>>,
+}
+
+#[derive(Debug)]
+struct GithubReleaseInfo {
+    latest_version: String,
+    notes: String,
+    published_at: Option<String>,
+    html_url: String,
+    download_url: Option<String>,
+    asset_name: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -451,52 +460,16 @@ fn pick_release_download_asset(assets: &[GithubReleaseAsset]) -> Option<&GithubR
     assets.first()
 }
 
-#[tauri::command]
-async fn check_app_update(app: tauri::AppHandle, state: tauri::State<'_, AppState>) -> Result<AppUpdateInfo, String> {
-    let current_version = app.package_info().version.to_string();
-    let mut native_configured = false;
+fn supports_direct_installer(asset_name: Option<&str>, download_url: Option<&str>) -> bool {
+    let candidate = asset_name
+        .or(download_url)
+        .unwrap_or_default()
+        .to_lowercase();
 
-    #[cfg(not(any(target_os = "android", target_os = "ios")))]
-    {
-        if let Ok(updater) = app.updater() {
-            native_configured = true;
-            if let Ok(update) = updater.check().await {
-                let update_info = if let Some(update) = update.as_ref() {
-                    AppUpdateInfo {
-                        current_version: update.current_version.clone(),
-                        latest_version: update.version.clone(),
-                        available: true,
-                        notes: update.body.clone().unwrap_or_default().trim().to_string(),
-                        published_at: update.date.as_ref().map(|d| d.to_string()),
-                        html_url: APP_RELEASES_URL.to_string(),
-                        download_url: None,
-                        asset_name: None,
-                        can_install: true,
-                        source: "tauri".into(),
-                        native_configured: true,
-                    }
-                } else {
-                    AppUpdateInfo {
-                        current_version: current_version.clone(),
-                        latest_version: current_version.clone(),
-                        available: false,
-                        notes: String::new(),
-                        published_at: None,
-                        html_url: APP_RELEASES_URL.to_string(),
-                        download_url: None,
-                        asset_name: None,
-                        can_install: false,
-                        source: "tauri".into(),
-                        native_configured: true,
-                    }
-                };
+    candidate.ends_with(".msi") || candidate.ends_with(".exe")
+}
 
-                *state.pending_update.lock().unwrap() = update;
-                return Ok(update_info);
-            }
-        }
-    }
-
+async fn fetch_github_latest_release_info() -> Result<GithubReleaseInfo, String> {
     let client = reqwest::Client::builder()
         .user_agent("DevStack-Updater")
         .timeout(Duration::from_secs(12))
@@ -520,16 +493,219 @@ async fn check_app_update(app: tauri::AppHandle, state: tauri::State<'_, AppStat
     let latest_version = release.tag_name.trim().trim_start_matches('v').to_string();
     let selected_asset = pick_release_download_asset(&release.assets);
 
-    Ok(AppUpdateInfo {
-        current_version: current_version.clone(),
-        latest_version: latest_version.clone(),
-        available: is_version_newer(&latest_version, &current_version),
+    Ok(GithubReleaseInfo {
+        latest_version,
         notes: release.body.unwrap_or_default().trim().to_string(),
         published_at: release.published_at,
         html_url: release.html_url,
         download_url: selected_asset.map(|asset| asset.browser_download_url.clone()),
         asset_name: selected_asset.map(|asset| asset.name.clone()),
-        can_install: false,
+    })
+}
+
+async fn download_update_asset_with_progress(
+    app: &tauri::AppHandle,
+    url: &str,
+    dest_path: &Path,
+) -> Result<(), String> {
+    use futures_util::StreamExt;
+
+    let client = reqwest::Client::builder()
+        .user_agent("DevStack-Updater")
+        .timeout(Duration::from_secs(300))
+        .connect_timeout(Duration::from_secs(15))
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    let response = client.get(url).send().await.map_err(|e| e.to_string())?;
+    let response = response.error_for_status().map_err(|e| e.to_string())?;
+    let total_size = response.content_length().unwrap_or(0);
+
+    let _ = app.emit(
+        "app-update-download",
+        serde_json::json!({
+            "event": "Started",
+            "data": {
+                "contentLength": total_size
+            }
+        }),
+    );
+
+    if let Some(parent) = dest_path.parent() {
+        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+
+    let mut body = response.bytes_stream();
+    let mut bytes = Vec::new();
+
+    while let Some(chunk) = body.next().await {
+        let chunk = chunk.map_err(|e| e.to_string())?;
+        let chunk_length = chunk.len() as u64;
+        bytes.extend_from_slice(&chunk);
+
+        let _ = app.emit(
+            "app-update-download",
+            serde_json::json!({
+                "event": "Progress",
+                "data": {
+                    "chunkLength": chunk_length
+                }
+            }),
+        );
+    }
+
+    fs::write(dest_path, &bytes).map_err(|e| e.to_string())?;
+
+    let _ = app.emit(
+        "app-update-download",
+        serde_json::json!({
+            "event": "Finished"
+        }),
+    );
+
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn launch_downloaded_update_installer(installer_path: &Path) -> Result<(), String> {
+    use std::os::windows::process::CommandExt;
+
+    const CREATE_NO_WINDOW: u32 = 0x08000000;
+    let extension = installer_path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .unwrap_or_default()
+        .to_lowercase();
+
+    match extension.as_str() {
+        "msi" => {
+            Command::new("msiexec.exe")
+                .args([
+                    "/i",
+                    installer_path.to_string_lossy().as_ref(),
+                    "/passive",
+                    "/norestart",
+                ])
+                .creation_flags(CREATE_NO_WINDOW)
+                .spawn()
+                .map_err(|e| e.to_string())?;
+            Ok(())
+        }
+        "exe" => {
+            Command::new(installer_path)
+                .arg("/S")
+                .creation_flags(CREATE_NO_WINDOW)
+                .spawn()
+                .map_err(|e| e.to_string())?;
+            Ok(())
+        }
+        _ => Err("Unsupported update installer type".into()),
+    }
+}
+
+#[tauri::command]
+async fn check_app_update(app: tauri::AppHandle, state: tauri::State<'_, AppState>) -> Result<AppUpdateInfo, String> {
+    let current_version = app.package_info().version.to_string();
+    let mut native_configured = false;
+    let github_latest = fetch_github_latest_release_info().await?;
+
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    {
+        if let Ok(updater) = app.updater() {
+            native_configured = true;
+            if let Ok(update) = updater.check().await {
+                let update_info = if let Some(update) = update {
+                    let native_version = update.version.clone();
+                    let native_matches_latest = normalize_version_for_compare(&native_version)
+                        == normalize_version_for_compare(&github_latest.latest_version);
+
+                    if native_matches_latest {
+                        let native_current_version = update.current_version.clone();
+                        let native_notes = update.body.clone().unwrap_or_default().trim().to_string();
+                        let native_published_at = update.date.as_ref().map(|d| d.to_string());
+                        *state.pending_update.lock().unwrap() = Some(update);
+
+                        AppUpdateInfo {
+                            current_version: native_current_version,
+                            latest_version: github_latest.latest_version.clone(),
+                            available: true,
+                            notes: if github_latest.notes.is_empty() {
+                                native_notes
+                            } else {
+                                github_latest.notes.clone()
+                            },
+                            published_at: github_latest
+                                .published_at
+                                .clone()
+                                .or(native_published_at),
+                            html_url: github_latest.html_url.clone(),
+                            download_url: github_latest.download_url.clone(),
+                            asset_name: github_latest.asset_name.clone(),
+                            can_install: true,
+                            source: "tauri".into(),
+                            native_configured: true,
+                        }
+                    } else {
+                        *state.pending_update.lock().unwrap() = None;
+
+                        AppUpdateInfo {
+                            current_version: current_version.clone(),
+                            latest_version: github_latest.latest_version.clone(),
+                            available: is_version_newer(&github_latest.latest_version, &current_version),
+                            notes: github_latest.notes.clone(),
+                            published_at: github_latest.published_at.clone(),
+                            html_url: github_latest.html_url.clone(),
+                            download_url: github_latest.download_url.clone(),
+                            asset_name: github_latest.asset_name.clone(),
+                            can_install: supports_direct_installer(
+                                github_latest.asset_name.as_deref(),
+                                github_latest.download_url.as_deref(),
+                            ),
+                            source: "github".into(),
+                            native_configured: true,
+                        }
+                    }
+                } else {
+                    *state.pending_update.lock().unwrap() = None;
+
+                    AppUpdateInfo {
+                        current_version: current_version.clone(),
+                        latest_version: github_latest.latest_version.clone(),
+                        available: is_version_newer(&github_latest.latest_version, &current_version),
+                        notes: github_latest.notes.clone(),
+                        published_at: github_latest.published_at.clone(),
+                        html_url: github_latest.html_url.clone(),
+                        download_url: github_latest.download_url.clone(),
+                        asset_name: github_latest.asset_name.clone(),
+                        can_install: supports_direct_installer(
+                            github_latest.asset_name.as_deref(),
+                            github_latest.download_url.as_deref(),
+                        ),
+                        source: "github".into(),
+                        native_configured: true,
+                    }
+                };
+
+                return Ok(update_info);
+            }
+        }
+    }
+
+    let can_install = supports_direct_installer(
+        github_latest.asset_name.as_deref(),
+        github_latest.download_url.as_deref(),
+    );
+
+    Ok(AppUpdateInfo {
+        current_version: current_version.clone(),
+        latest_version: github_latest.latest_version.clone(),
+        available: is_version_newer(&github_latest.latest_version, &current_version),
+        notes: github_latest.notes,
+        published_at: github_latest.published_at,
+        html_url: github_latest.html_url,
+        download_url: github_latest.download_url,
+        asset_name: github_latest.asset_name,
+        can_install,
         source: "github".into(),
         native_configured,
     })
@@ -576,55 +752,99 @@ fn open_external_target(target: String) -> Result<(), String> {
 async fn install_app_update(app: tauri::AppHandle, state: tauri::State<'_, AppState>) -> Result<(), String> {
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
-        let Some(update) = state.pending_update.lock().unwrap().take() else {
-            return Err("There is no pending update. Please check for updates again.".into());
+        let pending_update = {
+            let mut guard = state.pending_update.lock().unwrap();
+            guard.take()
         };
 
-        let started = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let app_handle = app.clone();
-        let started_flag = started.clone();
+        if let Some(update) = pending_update {
+            let started = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let app_handle = app.clone();
+            let started_flag = started.clone();
 
-        update
-            .download_and_install(
-                move |chunk_length, content_length| {
-                    if !started_flag.swap(true, Ordering::SeqCst) {
+            update
+                .download_and_install(
+                    move |chunk_length, content_length| {
+                        if !started_flag.swap(true, Ordering::SeqCst) {
+                            let _ = app_handle.emit(
+                                "app-update-download",
+                                serde_json::json!({
+                                    "event": "Started",
+                                    "data": {
+                                        "contentLength": content_length
+                                    }
+                                }),
+                            );
+                        }
+
                         let _ = app_handle.emit(
                             "app-update-download",
                             serde_json::json!({
-                                "event": "Started",
+                                "event": "Progress",
                                 "data": {
-                                    "contentLength": content_length
+                                    "chunkLength": chunk_length
                                 }
                             }),
                         );
-                    }
+                    },
+                    || {
+                        let _ = app.emit(
+                            "app-update-download",
+                            serde_json::json!({
+                                "event": "Finished"
+                            }),
+                        );
+                    },
+                )
+                .await
+                .map_err(|e| e.to_string())?;
 
-                    let _ = app_handle.emit(
-                        "app-update-download",
-                        serde_json::json!({
-                            "event": "Progress",
-                            "data": {
-                                "chunkLength": chunk_length
-                            }
-                        }),
-                    );
-                },
-                || {
-                    let _ = app.emit(
-                        "app-update-download",
-                        serde_json::json!({
-                            "event": "Finished"
-                        }),
-                    );
-                },
-            )
-            .await
-            .map_err(|e| e.to_string())?;
+            #[cfg(not(target_os = "windows"))]
+            app.request_restart();
+
+            return Ok(());
+        }
+
+        let github_latest = fetch_github_latest_release_info().await?;
+        let download_url = github_latest
+            .download_url
+            .as_deref()
+            .ok_or_else(|| "No downloadable latest installer was found".to_string())?;
+        let asset_name = github_latest
+            .asset_name
+            .clone()
+            .ok_or_else(|| "The latest release asset is missing a filename".to_string())?;
+
+        if !supports_direct_installer(Some(&asset_name), Some(download_url)) {
+            return Err("The latest release does not expose a directly installable Windows asset".into());
+        }
+
+        #[cfg(target_os = "windows")]
+        {
+            let temp_root = std::env::temp_dir()
+                .join("devstack-updater")
+                .join(github_latest.latest_version.clone());
+            let installer_path = temp_root.join(asset_name);
+
+            download_update_asset_with_progress(&app, download_url, &installer_path).await?;
+
+            let _ = app.emit(
+                "app-update-download",
+                serde_json::json!({
+                    "event": "Installing"
+                }),
+            );
+
+            launch_downloaded_update_installer(&installer_path)?;
+            app.exit(0);
+            return Ok(());
+        }
 
         #[cfg(not(target_os = "windows"))]
-        app.request_restart();
-
-        return Ok(());
+        {
+            let _ = github_latest;
+            return Err("Direct latest-installer updates are only implemented for Windows".into());
+        }
     }
 
     #[cfg(any(target_os = "android", target_os = "ios"))]
