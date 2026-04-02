@@ -53,16 +53,16 @@ function LandingPage() {
         </header>
 
         <main className="flex-1 py-10 sm:py-14">
-          <section className="grid gap-10 lg:grid-cols-[1.2fr_0.8fr] lg:items-center">
+          <section className="grid gap-10 lg:grid-cols-[1.05fr_0.95fr] lg:items-center">
             <div>
               <div className="mb-4 inline-flex rounded-full border border-emerald-300/20 bg-emerald-300/10 px-3 py-1 font-mono text-xs uppercase tracking-[0.28em] text-emerald-200">
                 Công cụ desktop cho local stack
               </div>
-              <h1 className="max-w-4xl font-display text-4xl font-bold leading-[1.02] text-white sm:text-5xl lg:text-6xl">
-                DevStack giúp môi trường local trên Windows gọn hơn, nhanh hơn và dễ kiểm soát hơn.
+              <h1 className="max-w-3xl text-3xl font-semibold leading-[1.08] tracking-[-0.03em] text-white sm:text-4xl lg:text-5xl">
+                Quản lý local stack trên Windows gọn hơn, nhanh hơn và đỡ rời rạc hơn.
               </h1>
-              <p className="mt-6 max-w-2xl text-base leading-8 text-slate-300 sm:text-lg">
-                Một app desktop tập trung để quản lý Apache, PHP, MySQL, Redis, tunnels và cấu hình dự án local mà không cần ghép nhiều công cụ rời rạc.
+              <p className="mt-5 max-w-2xl text-[15px] leading-8 text-slate-300 sm:text-[17px]">
+                DevStack gom Apache, PHP, MySQL, Redis, tunnels và cấu hình dự án local vào một nơi, để bạn không phải ghép nhiều tool và sửa tay quá nhiều bước.
               </p>
               <div className="mt-8 flex flex-wrap gap-4">
                 <a
@@ -105,7 +105,7 @@ function LandingPage() {
                   <div className="grid gap-3 sm:grid-cols-2">
                     <div className="rounded-2xl border border-white/8 bg-white/5 p-4">
                       <div className="text-sm text-slate-400">Trọng tâm</div>
-                      <div className="mt-2 text-xl font-semibold text-white">Workflow PHP local</div>
+                      <div className="mt-2 text-xl font-semibold text-white">PHP local workflow</div>
                     </div>
                     <div className="rounded-2xl border border-white/8 bg-white/5 p-4">
                       <div className="text-sm text-slate-400">Nền tảng</div>
