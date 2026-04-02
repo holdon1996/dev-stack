@@ -64,21 +64,6 @@ const Sidebar = () => {
           <Settings size={16} />
           {t('settings')}
         </div>
-
-        <div className="mt-6 px-3 py-4 border-t border-white/10 bg-white/[0.03] rounded-xl mx-1 shadow-2xl">
-          <div className="flex flex-col gap-1.5">
-            <div className="text-[10px] font-bold text-accent uppercase tracking-[0.15em]">
-              © 2026 DevStack
-            </div>
-            <div className="text-[12px] text-white font-semibold flex items-center gap-2 mt-1">
-              <span className="text-[10px] text-accent/80 font-bold uppercase tracking-tighter bg-accent/10 px-1.5 py-0.5 rounded">{t('creator')}</span>
-              <span>ThachVD</span>
-            </div>
-            <div className="text-[11px] text-textDim hover:text-white transition-colors cursor-default select-all" title="vuducthach25@gmail.com">
-              vuducthach25@gmail.com
-            </div>
-          </div>
-        </div>
       </nav>
 
       {/* System Status Bar */}
