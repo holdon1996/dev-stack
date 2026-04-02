@@ -87,13 +87,21 @@ It focuses on:
 ## Screenshots
 
 <p align="center">
-  <img src="docs/screenshots/services.png" alt="DevStack Services" width="48%">
-  <img src="docs/screenshots/sites.png" alt="DevStack Sites" width="48%">
+  <a href="https://raw.githubusercontent.com/holdon1996/dev-stack/main/docs/screenshots/services.png">
+    <img src="docs/screenshots/services.png" alt="DevStack Services" width="48%">
+  </a>
+  <a href="https://raw.githubusercontent.com/holdon1996/dev-stack/main/docs/screenshots/sites.png">
+    <img src="docs/screenshots/sites.png" alt="DevStack Sites" width="48%">
+  </a>
 </p>
 
 <p align="center">
-  <img src="docs/screenshots/php.png" alt="DevStack PHP" width="48%">
-  <img src="docs/screenshots/settings.png" alt="DevStack Settings" width="48%">
+  <a href="https://raw.githubusercontent.com/holdon1996/dev-stack/main/docs/screenshots/php.png">
+    <img src="docs/screenshots/php.png" alt="DevStack PHP" width="48%">
+  </a>
+  <a href="https://raw.githubusercontent.com/holdon1996/dev-stack/main/docs/screenshots/settings.png">
+    <img src="docs/screenshots/settings.png" alt="DevStack Settings" width="48%">
+  </a>
 </p>
 
 - `Services`: manage running services, ports, versions, and quick actions
