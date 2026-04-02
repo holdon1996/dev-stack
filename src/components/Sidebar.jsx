@@ -1,9 +1,27 @@
 import React from 'react';
 import { useStore } from '../store';
+import { getVersion } from '@tauri-apps/api/app';
 import { Layout, Globe, Database, Code, FileText, Settings, Radio, FileCode, Server, Boxes } from 'lucide-react';
 
 const Sidebar = () => {
   const { activePage, setActivePage, systemStats, t } = useStore();
+  const [appVersion, setAppVersion] = React.useState('...');
+
+  React.useEffect(() => {
+    let mounted = true;
+
+    getVersion()
+      .then((version) => {
+        if (mounted) setAppVersion(version);
+      })
+      .catch(() => {
+        if (mounted) setAppVersion('unknown');
+      });
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   const navItems = [
     { id: 'services', label: t('services'), icon: Layout },
@@ -27,7 +45,7 @@ const Sidebar = () => {
         <div className="text-xl font-extrabold tracking-tighter text-text">
           dev<span className="text-accent">stack</span>
         </div>
-        <div className="text-[10px] text-muted font-mono mt-0.5">v1.0.0</div>
+        <div className="text-[10px] text-muted font-mono mt-0.5">v{appVersion}</div>
       </div>
 
       <nav className="flex flex-col gap-0.5 flex-1 min-h-0 overflow-y-auto overflow-x-hidden pr-1">
