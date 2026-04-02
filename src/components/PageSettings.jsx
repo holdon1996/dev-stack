@@ -154,6 +154,13 @@ const PageSettings = () => {
   };
 
   const publishedAtLabel = formatReleaseDate(appUpdate.publishedAt);
+  const formattedReleaseNotes = React.useMemo(() => {
+    if (!appUpdate.notes) return '';
+
+    return appUpdate.notes
+      .replace(/\*\*(.*?)\*\*/g, '$1')
+      .replace(/^-\s+/gm, '• ');
+  }, [appUpdate.notes]);
 
   return (
     <div className="flex-1 flex flex-col overflow-y-auto">
@@ -313,11 +320,11 @@ const PageSettings = () => {
             </div>
           ) : null}
 
-          {appUpdate.notes ? (
+          {formattedReleaseNotes ? (
             <div className="bg-panel/50 border border-border rounded-2xl p-4">
               <div className="text-[11px] text-muted uppercase tracking-[0.08em] mb-2">{t('releaseNotes')}</div>
               <div className="text-[12px] text-textDim whitespace-pre-wrap max-h-44 overflow-y-auto leading-relaxed">
-                {appUpdate.notes}
+                {formattedReleaseNotes}
               </div>
             </div>
           ) : null}

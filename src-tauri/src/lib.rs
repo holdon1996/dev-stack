@@ -593,7 +593,10 @@ fn launch_downloaded_update_installer(installer_path: &Path) -> Result<(), Strin
         }
         "exe" => {
             Command::new(installer_path)
-                .arg("/S")
+                // Tauri's NSIS installer can relaunch the app after a silent install
+                // when the `/R` flag is present. Without it, the updated app installs
+                // successfully but stays closed after the current process exits.
+                .args(["/S", "/R"])
                 .creation_flags(CREATE_NO_WINDOW)
                 .spawn()
                 .map_err(|e| e.to_string())?;

@@ -1,27 +1,11 @@
 import React from 'react';
 import { useStore } from '../store';
-import { getVersion } from '@tauri-apps/api/app';
+import packageJson from '../../package.json';
 import { Layout, Globe, Database, Code, FileText, Settings, Radio, FileCode, Server, Boxes } from 'lucide-react';
 
 const Sidebar = () => {
   const { activePage, setActivePage, systemStats, t } = useStore();
-  const [appVersion, setAppVersion] = React.useState('...');
-
-  React.useEffect(() => {
-    let mounted = true;
-
-    getVersion()
-      .then((version) => {
-        if (mounted) setAppVersion(version);
-      })
-      .catch(() => {
-        if (mounted) setAppVersion('unknown');
-      });
-
-    return () => {
-      mounted = false;
-    };
-  }, []);
+  const appVersion = packageJson.version || 'unknown';
 
   const navItems = [
     { id: 'services', label: t('services'), icon: Layout },
