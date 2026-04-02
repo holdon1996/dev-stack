@@ -47,6 +47,8 @@ DevStack is a desktop tool for managing a local PHP / Apache / MySQL development
 
 Live project page: https://holdon1996.github.io/dev-stack/
 
+It is built for developers who want a local stack manager without juggling multiple tools, shell scripts, or a full VM / container setup.
+
 It focuses on:
 
 - managing Apache, MySQL, PHP, Redis, and project services in one UI
@@ -54,19 +56,15 @@ It focuses on:
 - handling virtual hosts, local sites, ports, logs, and quick config from one app
 - shipping as a native Windows desktop app with tray support and auto-update support
 
-## Highlights
+## What You Can Do
 
-- Native Tauri v2 desktop app
-- React + Zustand frontend
-- Rust backend for process management, file operations, downloads, and system integration
-- Apache version management
-- PHP version management and per-project switching
-- MySQL management and query execution
-- Virtual host setup with hosts file sync
-- Tunnel integrations page
-- Log viewer for Apache, MySQL, PHP, and Redis
-- Start with Windows support
-- Native updater support for packaged releases
+- Start, stop, and monitor local services from one place
+- Switch PHP and Apache versions for different projects
+- Manage MySQL instances and run quick queries
+- Create and manage local sites and virtual hosts
+- Review Apache, MySQL, PHP, and Redis logs in the app
+- Configure startup behavior, ports, paths, editor, and updates
+- Keep the app updated through packaged releases
 
 ## Main Sections
 
@@ -79,31 +77,39 @@ It focuses on:
 - `Quick Config`: shortcut actions for common setup tasks
 - `Settings`: paths, ports, startup behavior, editor, and updates
 
-## Tech Stack
-
-- Tauri v2
-- React 19
-- Zustand
-- Tailwind CSS
-- Rust
-
-## Project Structure
-
-```text
-src/                 React UI, state slices, hooks
-src-tauri/           Rust commands, Tauri config, bundling
-src/store/           Zustand slices for app domains
-scripts/             Local helper scripts
-.github/workflows/   Release automation
-```
-
 ## Quick Start
-
-Want to install DevStack quickly?
 
 - Download the latest packaged build from [Releases](https://github.com/holdon1996/dev-stack/releases/latest)
 - Run the `.exe` or `.msi` installer
-- Open DevStack and configure your paths, ports, and local services in `Settings`
+- Launch DevStack
+- Open `Settings` and configure your paths, ports, and local services
+
+## Screenshots
+
+<p align="center">
+  <img src="docs/screenshots/services.png" alt="DevStack Services" width="48%">
+  <img src="docs/screenshots/sites.png" alt="DevStack Sites" width="48%">
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/php.png" alt="DevStack PHP" width="48%">
+  <img src="docs/screenshots/settings.png" alt="DevStack Settings" width="48%">
+</p>
+
+- `Services`: manage running services, ports, versions, and quick actions
+- `Sites`: create and manage local domains and project folders
+- `PHP`: switch runtimes and inspect installed versions
+- `Settings`: configure paths, startup behavior, ports, and updates
+
+## Who This README Is For
+
+- If you only want to install and use DevStack, the sections above are enough
+- If you want to build, debug, or release the app, see the development notes below
+
+<details>
+<summary><strong>Development Notes</strong></summary>
+
+## Development
 
 ### Prerequisites
 
@@ -111,40 +117,53 @@ Want to install DevStack quickly?
 - Rust stable
 - Windows
 
-### Development
+### Run In Development
 
 ```powershell
 npm install
 npm run tauri dev
 ```
 
-### Production Build
+### Build A Release
 
 ```powershell
 npm run tauri build
 ```
 
-## Releases And Auto Update
+### Tech Stack
 
-Updater and release signing are already wired into the app and workflow.
+- Tauri v2
+- React 19
+- Zustand
+- Tailwind CSS
+- Rust
+
+### Project Structure
+
+```text
+src/                 React UI, state slices, hooks
+src-tauri/           Rust commands, Tauri config, bundling
+src/store/           Zustand slices for app domains
+scripts/             Local helper scripts for release and versioning
+.github/workflows/   Release automation
+```
+
+### Release And Auto Update Notes
+
+Release signing and updater flow are already wired into the app.
 
 - Release workflow: [.github/workflows/release.yml](/f:/dev-stack/.github/workflows/release.yml)
-- Local env helper: [scripts/set-updater-env.ps1](/f:/dev-stack/scripts/set-updater-env.ps1)
+- Local updater env helper: [scripts/set-updater-env.ps1](/f:/dev-stack/scripts/set-updater-env.ps1)
 
-If the repository is private, GitHub-hosted updater assets will not be publicly downloadable by end users. For the current updater URL strategy, the repository should be public or served through a separate update endpoint.
+If this repository is private, GitHub-hosted updater assets will not be publicly downloadable by end users. With the current updater URL strategy, the repository should stay public or use a separate update endpoint.
 
-## Recommended Setup
+### Recommended Setup
 
 - VS Code
 - Tauri extension
 - rust-analyzer
 
-## Roadmap
-
-- Better release presentation and screenshots
-- More automated runtime discovery
-- Improved SSL and local certificate flow
-- Better onboarding for first-time setup
+</details>
 
 ## Star History
 
@@ -156,5 +175,13 @@ If the repository is private, GitHub-hosted updater assets will not be publicly 
 
 ## Support
 
-- Issues: https://github.com/holdon1996/dev-stack/issues
-- Releases: https://github.com/holdon1996/dev-stack/releases
+- Report bugs or request features: https://github.com/holdon1996/dev-stack/issues
+- Download packaged builds: https://github.com/holdon1996/dev-stack/releases
+
+### Donate
+
+If DevStack is useful in your workflow, you can support the project here:
+
+<p align="center">
+  <img src="qr-donate.png" alt="Donate QR Code" width="260">
+</p>

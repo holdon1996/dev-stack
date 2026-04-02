@@ -181,14 +181,23 @@ const ServiceRow = ({ service }) => {
 const PageServices = () => {
   const { startAll, stopAll, showToast, t, startTime, services, systemStats, isElevated } = useStore();
   const { cpu, ram } = systemStats;
+  const [now, setNow] = React.useState(Date.now());
+
+  React.useEffect(() => {
+    const timer = window.setInterval(() => {
+      setNow(Date.now());
+    }, 30000);
+
+    return () => window.clearInterval(timer);
+  }, []);
 
   const uptimeStr = React.useMemo(() => {
     if (!startTime) return '0h 0m';
-    const diff = Math.floor((Date.now() - startTime) / 1000);
+    const diff = Math.max(0, Math.floor((now - startTime) / 1000));
     const h = Math.floor(diff / 3600);
     const m = Math.floor((diff % 3600) / 60);
     return `${h}h ${m}m`;
-  }, [startTime]);
+  }, [now, startTime]);
 
   const runningCount = services.filter(s => s.status === 'running').length;
 
