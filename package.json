@@ -1,7 +1,7 @@
 {
   "name": "tauri-app",
   "private": true,
-  "version": "1.0.13",
+  "version": "1.0.14",
   "homepage": "https://holdon1996.github.io/dev-stack/",
   "type": "module",
   "scripts": {
