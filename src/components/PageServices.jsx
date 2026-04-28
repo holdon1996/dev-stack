@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useStore } from '../store';
-import { Play, Pause, RotateCcw, Globe, Database, Cpu, Zap, Loader, Power } from 'lucide-react';
+import { Play, Pause, RotateCcw, Globe, Database, Cpu, Zap, Loader, Power, Mail } from 'lucide-react';
 
 const StatCard = ({ title, value, color }) => (
   <div className="metric-card shine">
@@ -19,7 +19,7 @@ const ServiceRow = ({ service }) => {
   const [isEditingPort, setIsEditingPort] = useState(false);
   const [tempPort, setTempPort] = useState(service.port);
 
-  const Icon = service.type === 'web' ? Globe : service.type === 'db' ? Database : service.type === 'php' ? Cpu : Zap;
+  const Icon = service.type === 'web' ? Globe : service.type === 'db' ? Database : service.type === 'php' ? Cpu : service.type === 'mail' ? Mail : Zap;
 
   // Get relevant versions for the dropdown
   const getVersions = () => {
@@ -31,6 +31,7 @@ const ServiceRow = ({ service }) => {
 
   const versions = getVersions();
   const activeVer = versions.find(v => v.active)?.version || '—';
+  const isTransitioning = service.status === 'starting' || service.status === 'stopping' || service.status === 'restarting';
 
   const handleVersionChange = async (e) => {
     const ver = e.target.value;
@@ -76,7 +77,7 @@ const ServiceRow = ({ service }) => {
             className="bg-bg border border-border rounded text-[11px] font-bold px-1.5 py-0.5 outline-none text-accent w-full cursor-pointer hover:border-accent/50 transition-colors"
             value={activeVer}
             onChange={handleVersionChange}
-            disabled={service.status === 'starting' || service.status === 'stopping'}
+            disabled={isTransitioning}
           >
             {versions.map(v => (
               <option key={v.version} value={v.version}>{v.version} {v.installed ? '' : useStore.getState().t('notInstalled')}</option>
@@ -136,15 +137,15 @@ const ServiceRow = ({ service }) => {
             className={`px-6 py-2 rounded-lg font-bold text-[13px] transition-all active:scale-95 flex items-center gap-2
               ${service.status === 'running'
                 ? 'bg-red-500/10 text-red-500 hover:bg-red-500/20'
-                : service.status === 'starting' || service.status === 'stopping'
+                : isTransitioning
                   ? 'bg-surface text-muted cursor-not-allowed'
                   : 'bg-accent text-bg hover:brightness-110 shadow-lg shadow-accent/20'
               }
             `}
             onClick={handleToggle}
-            disabled={service.status === 'starting' || service.status === 'stopping'}
+            disabled={isTransitioning}
           >
-            {service.status === 'starting' || service.status === 'stopping' ? (
+            {isTransitioning ? (
               <Loader size={14} className="animate-spin" />
             ) : service.status === 'running' ? useStore.getState().t('stop') : useStore.getState().t('start')}
           </button>

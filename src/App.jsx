@@ -11,6 +11,7 @@ import PageTunnels from './components/PageTunnels';
 import PageQuickConfig from './components/PageQuickConfig';
 import PageApache from './components/PageApache';
 import PageNode from './components/PageNode';
+import PageMailServer from './components/PageMailServer';
 import Toast from './components/Toast';
 import Modal from './components/Modal';
 import { X, Minus, Maximize2 } from 'lucide-react';
@@ -111,6 +112,7 @@ function App() {
           {activePage === 'php' && <PagePHP />}
           {activePage === 'apache' && <PageApache />}
           {activePage === 'node' && <PageNode />}
+          {activePage === 'mail' && <PageMailServer />}
           {activePage === 'logs' && <PageLogs />}
           {activePage === 'tunnels' && <PageTunnels />}
           {activePage === 'quickconfig' && <PageQuickConfig />}

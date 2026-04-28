@@ -1,4 +1,4 @@
-import { getApacheDir, getMysqlDir, getRedisDir } from '../lib/paths';
+import { getApacheDir, getMysqlDir, getRedisDir, getPhpDir } from '../lib/paths';
 
 export const createServiceSlice = (set, get) => ({
     services: [
@@ -6,9 +6,10 @@ export const createServiceSlice = (set, get) => ({
         { id: 2, name: 'MySQL (DevStack)', type: 'db', version: '—', port: 3306, status: 'stopped', pid: null, memory: '—' },
         { id: 3, name: 'PHP (DevStack)', type: 'php', version: '—', port: 9000, status: 'stopped', pid: null, memory: '—' },
         { id: 4, name: 'Redis (DevStack)', type: 'cache', version: '-', port: 6379, status: 'stopped', pid: null, memory: '—' },
+        { id: 5, name: 'Mailpit (DevStack)', type: 'mail', version: '—', port: 1025, status: 'stopped', pid: null, memory: '—' },
     ],
 
-    logs: { apache: [], mysql: [], php: [], redis: [] },
+    logs: { apache: [], mysql: [], php: [], redis: [], mail: [] },
     currentLog: 'apache',
     portConflicts: {},
     _lastServiceCheck: 0,
@@ -32,6 +33,10 @@ export const createServiceSlice = (set, get) => ({
                 startOnBoot: false,
                 port80: 80,
                 portMySQL: 3306,
+                mailProvider: 'mailpit',
+                mailHost: '127.0.0.1',
+                mailSmtpPort: 1025,
+                mailUiPort: 8025,
                 trayIcon: true,
                 editorPath: '',
                 installPathInitialized: true,
@@ -39,7 +44,7 @@ export const createServiceSlice = (set, get) => ({
             },
             sites: [],
             databases: [],
-            logs: { apache: [], mysql: [], php: [], redis: [] },
+            logs: { apache: [], mysql: [], php: [], redis: [], mail: [] },
             portConflicts: {},
             apacheVersions: state.apacheVersions.map(v => ({ ...v, installed: false, active: false, installing: false, progress: 0 })),
             mysqlVersions: state.mysqlVersions.map(v => ({ ...v, installed: false, active: false, installing: false, progress: 0 })),
@@ -54,6 +59,34 @@ export const createServiceSlice = (set, get) => ({
         get().streamServiceLogs?.(id);
     },
     clearLog: () => set(s => ({ logs: { ...s.logs, [s.currentLog]: [] } })),
+
+    startMailpit: async () => {
+        const settings = get().settings;
+        const baseDir = (settings.devStackDir || 'C:/devstack').replace(/[\\\/]+$/, '');
+        const mailpitExe = `${baseDir}/bin/mail/mailpit/mailpit.exe`.replace(/\//g, '\\');
+        const host = settings.mailHost || '127.0.0.1';
+        const smtpPort = parseInt(settings.mailSmtpPort || 1025, 10);
+        const uiPort = parseInt(settings.mailUiPort || 8025, 10);
+
+        try {
+            const { invoke } = await import('@tauri-apps/api/core');
+            const installed = await invoke('path_exists', { path: mailpitExe });
+            if (!installed) {
+                get().showToast('Hãy cài Mailpit trong trang Mail Server trước.', 'warn');
+                return false;
+            }
+
+            const ok = await invoke('start_detached_process', {
+                executable: mailpitExe,
+                args: [`--smtp=${host}:${smtpPort}`, `--listen=${host}:${uiPort}`],
+            });
+            return !!ok;
+        } catch (e) {
+            console.error('startMailpit failed:', e);
+            get().showToast(`Không start được Mailpit: ${e}`, 'danger');
+            return false;
+        }
+    },
 
     startAll: async () => {
         for (const svc of get().services) {
@@ -112,7 +145,7 @@ export const createServiceSlice = (set, get) => ({
                                 ...svc,
                                 status: 'running',
                                 pid: proc.pid,
-                                version: proc.version || svc.version,
+                                version: svc.type === 'mail' ? (s.settings.mailpitVersion || proc.version || svc.version) : (proc.version || svc.version),
                                 memory: proc.memory + ' MB',
                                 path: proc.path,
                                 portConflict: false
@@ -193,18 +226,28 @@ export const createServiceSlice = (set, get) => ({
             return;
         }
 
-        let activeVer = svc.version;
-        if (activeVer === '—' || !activeVer) {
-            if (svc.type === 'web') activeVer = get().apacheVersions.find(v => v.active)?.version || '...';
-            if (svc.type === 'db') activeVer = get().mysqlVersions.find(v => v.active)?.version || '...';
-            if (svc.type === 'php') activeVer = get().phpVersions.find(v => v.active)?.version || '...';
-            if (svc.type === 'cache') activeVer = 'Latest';
+        if (action === 'restart') {
+            const isRunning = svc.status === 'running' || svc.pid;
+            get().showToast(get().t('restarting', { name: svc.name }) || `Restarting ${svc.name}...`, 'info');
+            if (isRunning) {
+                await get().toggleService(id, 'stop');
+                await new Promise(r => setTimeout(r, 500));
+            }
+            await get().toggleService(id, 'start');
+            return;
         }
+
+        let activeVer = svc.version;
+        if (svc.type === 'web') activeVer = get().apacheVersions.find(v => v.active && v.installed)?.version || activeVer || '...';
+        if (svc.type === 'db') activeVer = get().mysqlVersions.find(v => v.active && v.installed)?.version || activeVer || '...';
+        if (svc.type === 'php') activeVer = get().phpVersions.find(v => v.active && v.installed)?.version || activeVer || '...';
+        if (svc.type === 'cache') activeVer = 'Latest';
+        if (svc.type === 'mail') activeVer = get().settings.mailpitVersion || activeVer || 'Mailpit';
         const svcLabel = `${svc.name.replace(' (DevStack)', '')} v${activeVer} (Port: ${svc.port})`;
 
         const isRunning = svc.status === 'running' || svc.pid;
         const shouldStop = action ? action === 'stop' : isRunning;
-        const logType = svc.type === 'web' ? 'apache' : svc.type === 'db' ? 'mysql' : svc.type === 'cache' ? 'redis' : 'php';
+        const logType = svc.type === 'web' ? 'apache' : svc.type === 'db' ? 'mysql' : svc.type === 'cache' ? 'redis' : svc.type === 'mail' ? 'mail' : 'php';
 
         console.log(`[Timer] Toggle clicked for ${svc.name} - Action: ${shouldStop ? 'STOP' : 'START'}`);
 
@@ -213,7 +256,7 @@ export const createServiceSlice = (set, get) => ({
             get().addServiceLog(logType, `Stopping ${svcLabel} ...`, 'warn');
             set(s => ({ services: s.services.map(sv => sv.id === id ? { ...sv, status: 'stopping' } : sv) }));
 
-            const name = svc.type === 'web' ? 'httpd.exe' : svc.type === 'db' ? 'mysqld.exe' : svc.type === 'cache' ? 'redis-server.exe' : 'php-cgi.exe';
+            const name = svc.type === 'web' ? 'httpd.exe' : svc.type === 'db' ? 'mysqld.exe' : svc.type === 'cache' ? 'redis-server.exe' : svc.type === 'mail' ? 'mailpit.exe' : 'php-cgi.exe';
             const { invoke } = await import('@tauri-apps/api/core');
 
             const t1 = performance.now();
@@ -243,6 +286,7 @@ export const createServiceSlice = (set, get) => ({
             if (svc.type === 'db') started = await get().startMysql();
             if (svc.type === 'php') started = await get().startPhp();
             if (svc.type === 'cache') started = await get().startRedis();
+            if (svc.type === 'mail') started = await get().startMailpit();
 
             console.log(`[Timer] Native Rust spawn done in ${(performance.now() - t1).toFixed(2)}ms`);
 
@@ -315,6 +359,7 @@ export const createServiceSlice = (set, get) => ({
         }
         if (svc?.type === 'cache') get().updateSettings({ portRedis: intPort });
         if (svc?.type === 'php') get().updateSettings({ portPHP: intPort });
+        if (svc?.type === 'mail') get().updateSettings({ mailSmtpPort: intPort });
 
         get().showToast(`Updated ${svc?.name} port to ${intPort} and saved to config`, 'ok');
         get().checkServicesRunning();
@@ -387,6 +432,7 @@ export const createServiceSlice = (set, get) => ({
                 if (svc.type === 'db') return { ...svc, port: s.portMySQL || svc.port };
                 if (svc.type === 'cache') return { ...svc, port: s.portRedis || svc.port };
                 if (svc.type === 'php') return { ...svc, port: s.portPHP || svc.port };
+                if (svc.type === 'mail') return { ...svc, port: s.mailSmtpPort || svc.port, version: s.mailpitVersion || svc.version };
                 return svc;
             })
         }));
@@ -416,7 +462,7 @@ export const createServiceSlice = (set, get) => ({
     killAllChildProcesses: async () => {
         try {
             const { invoke } = await import('@tauri-apps/api/core');
-            const processes = ['httpd.exe', 'mysqld.exe', 'redis-server.exe', 'php-cgi.exe', 'php.exe'];
+            const processes = ['httpd.exe', 'mysqld.exe', 'redis-server.exe', 'php-cgi.exe', 'php.exe', 'mailpit.exe'];
             await Promise.all(processes.map(name => invoke('kill_process_by_name_exact', { name })));
         } catch (e) {
             console.error('Failed to kill processes natively', e);
@@ -432,16 +478,23 @@ export const createServiceSlice = (set, get) => ({
         const devDir = (s.devStackDir || 'C:/devstack');
         const targetPath = (prjPath || s.rootPath || devDir).replace(/\//g, '\\');
         const { invoke } = await import('@tauri-apps/api/core');
+        const activePhp = get().phpVersions?.find(v => v.active && v.installed);
         const activeNode = get().nodeVersions?.find(v => v.active);
+        const phpPathPrefix = activePhp
+            ? `${getPhpDir(get(), activePhp).replace(/\//g, '\\')};`
+            : '';
         const nodePathPrefix = activeNode
-            ? `set "PATH=${devDir.replace(/\//g, '\\')}\\bin\\node\\current;%PATH%" && `
+            ? `${devDir.replace(/\//g, '\\')}\\bin\\node\\current;`
+            : '';
+        const envPathPrefix = phpPathPrefix || nodePathPrefix
+            ? `set "PATH=${phpPathPrefix}${nodePathPrefix}%PATH%" && `
             : '';
 
         // We use cmd.exe as a wrapper to set the title and current directory easily
         // but start it detached.
         await invoke('start_detached_process', {
             executable: 'cmd.exe',
-            args: ['/C', 'start', '""', 'cmd.exe', '/K', `title DevStack Terminal && ${nodePathPrefix}cd /d "${targetPath}"`]
+            args: ['/C', 'start', '""', 'cmd.exe', '/K', `title DevStack Terminal && ${envPathPrefix}cd /d "${targetPath}"`]
         });
     },
 

@@ -1,4 +1,4 @@
-import { getApacheDir } from '../lib/paths';
+import { getApacheDir, getPhpDir } from '../lib/paths';
 
 export const createApacheSlice = (set, get) => ({
     apacheVersions: [
@@ -198,7 +198,7 @@ export const createApacheSlice = (set, get) => ({
         if (!phpV?.installed) return;
         const devDir = get().settings.devStackDir.replace(/\\/g, '/');
         const apacheConf = `${devDir}/bin/apache/apache-${apacheVersion}/conf/httpd.conf`;
-        const phpDir = `${devDir}/bin/php/php-${phpVersion}`;
+        const phpDir = getPhpDir(get(), phpV);
         const major = parseInt(phpVersion.split('.')[0]);
         const modFile = major === 7 ? "php7apache2_4.dll" : "php8apache2_4.dll";
         const modName = major === 7 ? "php7_module" : "php_module";

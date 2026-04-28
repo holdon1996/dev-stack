@@ -37,11 +37,6 @@
           "args": true
         },
         {
-          "name": "powershell",
-          "cmd": "powershell",
-          "args": true
-        },
-        {
           "name": "mysql",
           "cmd": "mysql",
           "args": true
@@ -74,11 +69,6 @@
         {
           "name": "cmd",
           "cmd": "cmd",
-          "args": true
-        },
-        {
-          "name": "powershell",
-          "cmd": "powershell",
           "args": true
         },
         {

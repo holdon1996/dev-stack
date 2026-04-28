@@ -131,9 +131,40 @@ export const createMysqlSlice = (set, get) => ({
         get().showToast(`MySQL ${version} uninstalled`, 'warn');
     },
 
-    setActiveMysql: (version) => set(s => ({
-        mysqlVersions: s.mysqlVersions.map(v => ({ ...v, active: v.version === version }))
-    })),
+    setActiveMysql: async (version) => {
+        const target = get().mysqlVersions.find(v => v.version === version && v.installed);
+        if (!target) {
+            get().showToast(`MySQL ${version} chưa được cài đặt`, 'warn');
+            return;
+        }
+
+        const mysqlSvc = get().services.find(s => s.type === 'db');
+        const wasRunning = mysqlSvc?.status === 'running' || !!mysqlSvc?.pid;
+        get().addServiceLog?.('mysql', `Switching MySQL default version to ${version}...`, 'info');
+
+        if (wasRunning && mysqlSvc) {
+            get().showToast(`Đang đổi MySQL sang ${version}...`, 'info');
+            get().addServiceLog?.('mysql', `Stopping current MySQL before switching to ${version}...`, 'warn');
+            await get().toggleService(mysqlSvc.id, 'stop');
+        }
+
+        set(s => ({
+            mysqlVersions: s.mysqlVersions.map(v => ({ ...v, active: v.version === version })),
+            services: s.services.map(svc => svc.type === 'db' ? { ...svc, version } : svc)
+        }));
+
+        if (wasRunning && mysqlSvc) {
+            get().addServiceLog?.('mysql', `Starting MySQL ${version}...`, 'info');
+            await get().toggleService(mysqlSvc.id, 'start');
+            await get().checkServicesRunning();
+            get().addServiceLog?.('mysql', `MySQL ${version} is now active.`, 'ok');
+            get().showToast(`Đã đổi và khởi động lại MySQL ${version}`, 'ok');
+        } else {
+            get().addServiceLog?.('mysql', `MySQL ${version} selected as default.`, 'ok');
+            get().showToast(`Đã chọn MySQL ${version} làm mặc định`, 'ok');
+            await get().checkServicesRunning();
+        }
+    },
 
     openMysqlTerminal: async (version) => {
         const v = version || get().mysqlVersions.find(v => v.active)?.version;

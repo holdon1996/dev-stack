@@ -2,8 +2,8 @@ import { getPhpDir } from '../lib/paths';
 
 export const createPhpSlice = (set, get) => ({
     phpVersions: [
-        { version: '8.5.4', installed: false, active: false, installing: false, downloadUrl: 'https://downloads.php.net/~windows/releases/php-8.5.4-Win32-vs17-x64.zip', threadSafe: true, sizeMb: 33.5 },
-        { version: '8.4.19', installed: false, active: false, installing: false, downloadUrl: 'https://downloads.php.net/~windows/releases/php-8.4.19-Win32-vs17-x64.zip', threadSafe: true, sizeMb: 32.5 },
+        { version: '8.5.4', installed: false, active: false, installing: false, downloadUrl: 'https://downloads.php.net/~windows/releases/archives/php-8.5.4-Win32-vs17-x64.zip', threadSafe: true, sizeMb: 33.5 },
+        { version: '8.4.19', installed: false, active: false, installing: false, downloadUrl: 'https://downloads.php.net/~windows/releases/archives/php-8.4.19-Win32-vs17-x64.zip', threadSafe: true, sizeMb: 32.5 },
         { version: '8.3.30', installed: false, active: false, installing: false, downloadUrl: 'https://downloads.php.net/~windows/releases/php-8.3.30-Win32-vs16-x64.zip', threadSafe: true, sizeMb: 31.0 },
         { version: '8.2.30', installed: false, active: false, installing: false, downloadUrl: 'https://downloads.php.net/~windows/releases/php-8.2.30-Win32-vs16-x64.zip', threadSafe: true, sizeMb: 30.5 },
         { version: '8.1.34', installed: false, active: false, installing: false, downloadUrl: 'https://downloads.php.net/~windows/releases/php-8.1.34-Win32-vs16-x64.zip', threadSafe: true, sizeMb: 29.5 },
@@ -17,8 +17,8 @@ export const createPhpSlice = (set, get) => ({
     apacheInstallProgress: { pct: 0, downloaded: 0, total: 0 },
 
     _phpFallbacks: {
-        '8.5.4': 'https://downloads.php.net/~windows/releases/php-8.5.4-Win32-vs17-x64.zip',
-        '8.4.19': 'https://downloads.php.net/~windows/releases/php-8.4.19-Win32-vs17-x64.zip',
+        '8.5.4': 'https://downloads.php.net/~windows/releases/archives/php-8.5.4-Win32-vs17-x64.zip',
+        '8.4.19': 'https://downloads.php.net/~windows/releases/archives/php-8.4.19-Win32-vs17-x64.zip',
         '8.3.30': 'https://downloads.php.net/~windows/releases/php-8.3.30-Win32-vs16-x64.zip',
         '8.2.30': 'https://downloads.php.net/~windows/releases/php-8.2.30-Win32-vs16-x64.zip',
         '8.1.34': 'https://downloads.php.net/~windows/releases/php-8.1.34-Win32-vs16-x64.zip',
@@ -223,17 +223,23 @@ export const createPhpSlice = (set, get) => ({
 
         const devDir = get().settings.devStackDir.replace(/\\/g, '/');
         const phpDir = `${devDir}/bin/php/php-${version}`;
+        let unlistenLogs = null;
+        let unlistenProgress = null;
 
         try {
             const { invoke } = await import('@tauri-apps/api/core');
             const { listen } = await import('@tauri-apps/api/event');
 
-            const unlistenLogs = await listen('php-install-log', (event) => {
+            const logsReceived = new Set();
+
+            unlistenLogs = await listen('php-install-log', (event) => {
                 const line = event.payload;
+                if (logsReceived.has(line)) return;
+                logsReceived.add(line);
                 set(s => ({ phpInstallLogs: [...s.phpInstallLogs, { t: new Date().toLocaleTimeString(), m: line, l: 'info' }] }));
             });
 
-            const unlistenProgress = await listen('download-progress', (event) => {
+            unlistenProgress = await listen('download-progress', (event) => {
                 const { svcType, pct, downloaded, total } = event.payload;
                 if (svcType === 'php') {
                     set({ phpInstallProgress: { pct, downloaded, total } });
@@ -248,9 +254,6 @@ export const createPhpSlice = (set, get) => ({
                 expectedSizeMb: v?.sizeMb || null
             });
 
-            unlistenLogs();
-            unlistenProgress();
-
             if (result === "SUCCESS") {
                 set(s => ({ phpVersions: s.phpVersions.map(pv => pv.version === version ? { ...pv, installed: true, installing: false } : pv) }));
                 get().showToast(`PHP ${version} installed`, 'ok');
@@ -262,6 +265,9 @@ export const createPhpSlice = (set, get) => ({
                 phpInstallLogs: [...s.phpInstallLogs, { t: new Date().toLocaleTimeString(), m: `Error: ${e}`, l: 'err' }]
             }));
             get().showToast('Installation failed', 'danger');
+        } finally {
+            unlistenLogs?.();
+            unlistenProgress?.();
         }
     },
 
@@ -277,20 +283,22 @@ export const createPhpSlice = (set, get) => ({
 
         const devDir = get().settings.devStackDir.replace(/\\/g, '/');
         const phpDir = `${devDir}/bin/php/php-${version}`;
+        let unlistenLogs = null;
+        let unlistenProgress = null;
 
         try {
             const { invoke } = await import('@tauri-apps/api/core');
             const { listen } = await import('@tauri-apps/api/event');
 
-            let logsReceived = new Set();
-            const unlistenLogs = await listen('php-install-log', (event) => {
+            const logsReceived = new Set();
+            unlistenLogs = await listen('php-install-log', (event) => {
                 const line = event.payload;
                 if (logsReceived.has(line)) return;
                 logsReceived.add(line);
                 set(s => ({ phpInstallLogs: [...s.phpInstallLogs, { t: new Date().toLocaleTimeString(), m: line, l: 'info' }] }));
             });
 
-            const unlistenProgress = await listen('download-progress', (event) => {
+            unlistenProgress = await listen('download-progress', (event) => {
                 const { svcType, pct, downloaded, total } = event.payload;
                 if (svcType === 'php') {
                     set(s => ({
@@ -308,9 +316,6 @@ export const createPhpSlice = (set, get) => ({
                 expectedSizeMb: null  // custom install has no known size
             });
 
-            unlistenLogs();
-            unlistenProgress();
-
             if (result === "SUCCESS") {
                 set(s => ({
                     phpVersions: s.phpVersions.map(pv => pv.version === version ? { ...pv, installed: true, installing: false, progress: 100 } : pv)
@@ -324,6 +329,9 @@ export const createPhpSlice = (set, get) => ({
             console.error('installCustomPhp error:', e);
             set(s => ({ phpVersions: s.phpVersions.map(pv => pv.version === version ? { ...pv, installing: false } : pv) }));
             get().showToast(`Custom install failed: ${e}`, 'danger');
+        } finally {
+            unlistenLogs?.();
+            unlistenProgress?.();
         }
     },
 
@@ -339,20 +347,90 @@ export const createPhpSlice = (set, get) => ({
     },
 
     setActivePhp: async (version) => {
+        const target = get().phpVersions.find(v => v.version === version && v.installed);
+        if (!target) {
+            get().showToast(`PHP ${version} is not installed`, 'warn');
+            return;
+        }
+
         set({ activatingPhp: version });
+
+        const devDir = get().settings.devStackDir.replace(/[\\\/]+$/, '');
+        const phpDir = getPhpDir(get(), target);
+        get().addServiceLog?.('php', `Switching PHP runtime to ${version}...`, 'info');
+
+        try {
+            const { invoke } = await import('@tauri-apps/api/core');
+            get().showToast(`Đang thiết lập PHP ${version}...`, 'info');
+            get().addServiceLog?.('php', `Patching php.ini for PHP ${version}...`, 'info');
+            await invoke('patch_php_ini_extensions', {
+                iniPath: `${phpDir}/php.ini`.replace(/\//g, '\\')
+            });
+            get().addServiceLog?.('php', `Updating Windows PATH for PHP ${version}...`, 'info');
+            await invoke('set_php_global_path', {
+                baseDir: devDir.replace(/\//g, '\\'),
+                phpDir: phpDir.replace(/\//g, '\\')
+            });
+        } catch (e) {
+            console.error('Failed to update PHP environment', e);
+            const message = String(e || '');
+            get().addServiceLog?.('php', `Failed to switch PHP ${version}: ${message}`, 'err');
+            if (message.includes('Machine PATH') || message.includes('Administrator')) {
+                get().showToast('System PATH đang có PHP cũ. Hãy chạy DevStack bằng Administrator rồi đổi PHP lại.', 'warn');
+            } else {
+                get().showToast(`Không thể cập nhật PHP PATH: ${message}`, 'warn');
+            }
+            set({ activatingPhp: null });
+            return;
+        }
+
         set(s => ({
             phpVersions: s.phpVersions.map(v => ({ ...v, active: v.version === version }))
         }));
 
         const activeApache = get().apacheVersions.find(a => a.active && a.installed);
         if (activeApache) {
+            get().addServiceLog?.('php', `Rebinding Apache ${activeApache.version} to PHP ${version}...`, 'info');
             await get().configureApachePhp(version, activeApache.version);
+            get().addServiceLog?.('php', `Restarting Apache to load PHP ${version}...`, 'warn');
             await get().restartApache();
         }
 
         set({ activatingPhp: null });
+        await get().detectPhpVersion();
         await get().syncExtensionsFromActivePhp();
+        get().addServiceLog?.('php', `PHP ${version} activated successfully.`, 'ok');
         get().showToast(`PHP ${version} activated`, 'ok');
+    },
+
+    fixPhpConflict: async (forceGlobal = false) => {
+        try {
+            const { invoke } = await import('@tauri-apps/api/core');
+            const active = get().phpVersions.find(v => v.active && v.installed) || get().phpVersions.find(v => v.installed);
+            if (!active) {
+                get().showToast('Chưa có PHP DevStack nào được cài để đưa vào PATH.', 'warn');
+                return;
+            }
+
+            const elevated = await invoke('is_app_elevated');
+            if (forceGlobal && !elevated) {
+                get().showToast('DevStack cần chạy bằng Administrator để sửa System PATH.', 'warn');
+                await invoke('relaunch_as_admin');
+                return;
+            }
+
+            const devDir = get().settings.devStackDir.replace(/[\\\/]+$/, '');
+            const phpDir = getPhpDir(get(), active);
+            await invoke('set_php_global_path', {
+                baseDir: devDir.replace(/\//g, '\\'),
+                phpDir: phpDir.replace(/\//g, '\\')
+            });
+            await get().detectPhpVersion();
+            get().showToast('Đã cập nhật PHP PATH. Hãy mở terminal mới để kiểm tra lại.', 'ok');
+        } catch (e) {
+            console.error('fixPhpConflict error:', e);
+            get().showToast(`Không thể sửa PHP PATH: ${e}`, 'danger');
+        }
     },
 
     addExtension: async (ext) => {

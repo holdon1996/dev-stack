@@ -73,7 +73,6 @@ struct AppUpdateInfo {
 
 #[cfg(all(target_os = "windows", not(debug_assertions)))]
 fn ensure_elevated_on_startup() -> bool {
-    use std::os::windows::process::CommandExt;
     use windows_sys::Win32::UI::Shell::IsUserAnAdmin;
 
     if unsafe { IsUserAnAdmin() } != 0 {
@@ -86,47 +85,13 @@ fn ensure_elevated_on_startup() -> bool {
     };
 
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let escaped_args = if args.is_empty() {
-        String::new()
-    } else {
-        args.iter()
-            .map(|arg| format!("'{}'", arg.replace('\'', "''")))
-            .collect::<Vec<_>>()
-            .join(",")
-    };
+    let arg_line = args
+        .iter()
+        .map(|arg| quote_windows_arg(arg))
+        .collect::<Vec<_>>()
+        .join(" ");
 
-    let ps_cmd = if escaped_args.is_empty() {
-        format!(
-            "Start-Process -FilePath '{}' -Verb RunAs",
-            exe.display().to_string().replace('\'', "''")
-        )
-    } else {
-        format!(
-            "Start-Process -FilePath '{}' -ArgumentList @({}) -Verb RunAs",
-            exe.display().to_string().replace('\'', "''"),
-            escaped_args
-        )
-    };
-
-    let mut utf16_bytes = Vec::new();
-    for utf16_char in ps_cmd.encode_utf16() {
-        utf16_bytes.extend_from_slice(&utf16_char.to_le_bytes());
-    }
-    use base64::{Engine as _, engine::general_purpose};
-    let encoded_ps_cmd = general_purpose::STANDARD.encode(utf16_bytes);
-
-    let status = Command::new("powershell")
-        .args(&[
-            "-NoProfile",
-            "-WindowStyle",
-            "Hidden",
-            "-EncodedCommand",
-            &encoded_ps_cmd,
-        ])
-        .creation_flags(0x08000000)
-        .status();
-
-    matches!(status, Ok(s) if s.success())
+    shell_execute("runas", &exe.to_string_lossy(), Some(&arg_line), None, 1).is_ok()
 }
 
 #[cfg(not(all(target_os = "windows", not(debug_assertions))))]
@@ -144,6 +109,28 @@ fn is_app_elevated() -> bool {
     #[cfg(not(target_os = "windows"))]
     {
         false
+    }
+}
+
+#[tauri::command]
+fn relaunch_as_admin() -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        if is_app_elevated() {
+            return Ok(());
+        }
+
+        let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+        let args = std::env::args()
+            .skip(1)
+            .map(|arg| quote_windows_arg(&arg))
+            .collect::<Vec<_>>()
+            .join(" ");
+        shell_execute("runas", &exe.to_string_lossy(), Some(&args), None, 1)
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        Err("Administrator relaunch is only supported on Windows".into())
     }
 }
 
@@ -195,62 +182,83 @@ fn cleanup_webview_state_for_fresh_install() -> Result<(), String> {
 }
 
 #[cfg(target_os = "windows")]
-fn encode_powershell_command(script: &str) -> String {
-    let mut utf16_bytes = Vec::new();
-    for utf16_char in script.encode_utf16() {
-        utf16_bytes.extend_from_slice(&utf16_char.to_le_bytes());
-    }
-    use base64::{Engine as _, engine::general_purpose};
-    general_purpose::STANDARD.encode(utf16_bytes)
+fn to_wide_null(value: &str) -> Vec<u16> {
+    value.encode_utf16().chain(std::iter::once(0)).collect()
 }
 
 #[cfg(target_os = "windows")]
-fn run_hidden_powershell(script: &str) -> Result<std::process::Output, String> {
-    use std::os::windows::process::CommandExt;
+fn shell_execute(
+    verb: &str,
+    file: &str,
+    parameters: Option<&str>,
+    directory: Option<&str>,
+    show_cmd: i32,
+) -> Result<(), String> {
+    use windows_sys::Win32::UI::Shell::ShellExecuteW;
 
-    const CREATE_NO_WINDOW: u32 = 0x08000000;
-    let encoded_ps_cmd = encode_powershell_command(script);
+    let verb_w = to_wide_null(verb);
+    let file_w = to_wide_null(file);
+    let params_w = parameters.map(to_wide_null);
+    let dir_w = directory.map(to_wide_null);
+    let result = unsafe {
+        ShellExecuteW(
+            std::ptr::null_mut(),
+            verb_w.as_ptr(),
+            file_w.as_ptr(),
+            params_w.as_ref().map_or(std::ptr::null(), |value| value.as_ptr()),
+            dir_w.as_ref().map_or(std::ptr::null(), |value| value.as_ptr()),
+            show_cmd,
+        )
+    };
 
-    Command::new("powershell")
-        .args(&[
-            "-NoProfile",
-            "-NonInteractive",
-            "-WindowStyle",
-            "Hidden",
-            "-EncodedCommand",
-            &encoded_ps_cmd,
-        ])
-        .creation_flags(CREATE_NO_WINDOW)
-        .output()
-        .map_err(|e| e.to_string())
-}
-
-#[cfg(target_os = "windows")]
-fn run_elevated_powershell(script: &str) -> Result<(), String> {
-    use std::os::windows::process::CommandExt;
-
-    const CREATE_NO_WINDOW: u32 = 0x08000000;
-    let encoded_ps_cmd = encode_powershell_command(script);
-
-    let status = Command::new("powershell")
-        .args(&[
-            "-NoProfile",
-            "-WindowStyle",
-            "Hidden",
-            "-Command",
-            &format!(
-                "Start-Process powershell -ArgumentList \"-NoProfile -WindowStyle Hidden -EncodedCommand {}\" -Verb RunAs -Wait",
-                encoded_ps_cmd
-            ),
-        ])
-        .creation_flags(CREATE_NO_WINDOW)
-        .status()
-        .map_err(|e| e.to_string())?;
-
-    if status.success() {
+    if (result as isize) > 32 {
         Ok(())
     } else {
-        Err("PowerShell elevated command failed".into())
+        Err(format!("ShellExecuteW failed with code {}", result as isize))
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn quote_windows_arg(value: &str) -> String {
+    if value.is_empty() {
+        return "\"\"".to_string();
+    }
+    let needs_quotes = value.chars().any(|ch| ch.is_whitespace() || ch == '"');
+    if !needs_quotes {
+        return value.to_string();
+    }
+
+    let mut quoted = String::from("\"");
+    let mut backslashes = 0;
+    for ch in value.chars() {
+        match ch {
+            '\\' => backslashes += 1,
+            '"' => {
+                quoted.push_str(&"\\".repeat(backslashes * 2 + 1));
+                quoted.push('"');
+                backslashes = 0;
+            }
+            _ => {
+                quoted.push_str(&"\\".repeat(backslashes));
+                backslashes = 0;
+                quoted.push(ch);
+            }
+        }
+    }
+    quoted.push_str(&"\\".repeat(backslashes * 2));
+    quoted.push('"');
+    quoted
+}
+
+fn has_utf8_bom(bytes: &[u8]) -> bool {
+    bytes.starts_with(&[0xEF, 0xBB, 0xBF])
+}
+
+fn strip_utf8_bom(bytes: &[u8]) -> &[u8] {
+    if has_utf8_bom(bytes) {
+        &bytes[3..]
+    } else {
+        bytes
     }
 }
 
@@ -258,42 +266,23 @@ fn run_elevated_powershell(script: &str) -> Result<(), String> {
 fn get_start_on_boot() -> Result<bool, String> {
     #[cfg(target_os = "windows")]
     {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+
         let exe_path = std::env::current_exe().map_err(|e| e.to_string())?;
-        let exe_path = exe_path.display().to_string().replace('\'', "''");
-        let script = format!(
-            r#"
-$task = Get-ScheduledTask -TaskName '{task_name}' -ErrorAction SilentlyContinue
-if ($null -eq $task) {{
-    Write-Output 'false'
-    exit 0
-}}
+        let output = Command::new("schtasks.exe")
+            .args(["/Query", "/TN", WINDOWS_STARTUP_TASK_NAME, "/FO", "LIST", "/V"])
+            .creation_flags(CREATE_NO_WINDOW)
+            .output()
+            .map_err(|e| e.to_string())?;
 
-$expectedExe = '{exe_path}'
-$actionMatch = $false
-foreach ($action in $task.Actions) {{
-    if ($action.Execute -eq $expectedExe -and $action.Arguments -eq '--minimized') {{
-        $actionMatch = $true
-        break
-    }}
-}}
-
-if ($actionMatch -and $task.Principal.RunLevel -eq 'Highest') {{
-    Write-Output 'true'
-}} else {{
-    Write-Output 'false'
-}}
-"#,
-            task_name = WINDOWS_STARTUP_TASK_NAME,
-            exe_path = exe_path
-        );
-
-        let output = run_hidden_powershell(&script)?;
         if !output.status.success() {
-            return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
+            return Ok(false);
         }
-
         let stdout = String::from_utf8_lossy(&output.stdout);
-        return Ok(stdout.trim().eq_ignore_ascii_case("true"));
+        return Ok(stdout
+            .to_lowercase()
+            .contains(&exe_path.to_string_lossy().to_lowercase()));
     }
 
     #[cfg(not(target_os = "windows"))]
@@ -306,31 +295,33 @@ if ($actionMatch -and $task.Principal.RunLevel -eq 'Highest') {{
 fn set_start_on_boot(enabled: bool) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
-        let exe_path = std::env::current_exe().map_err(|e| e.to_string())?;
-        let exe_path = exe_path.display().to_string().replace('\'', "''");
-        let script = if enabled {
-            format!(
-                r#"
-$taskName = '{task_name}'
-$exePath = '{exe_path}'
-$userId = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
-$action = New-ScheduledTaskAction -Execute $exePath -Argument '--minimized'
-$trigger = New-ScheduledTaskTrigger -AtLogOn -User $userId
-$settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
-$principal = New-ScheduledTaskPrincipal -UserId $userId -LogonType Interactive -RunLevel Highest
-Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Settings $settings -Principal $principal -Description 'Start DevStack on Windows logon with elevated privileges.' -Force | Out-Null
-"#,
-                task_name = WINDOWS_STARTUP_TASK_NAME,
-                exe_path = exe_path
-            )
-        } else {
-            format!(
-                "Unregister-ScheduledTask -TaskName '{}' -Confirm:$false -ErrorAction SilentlyContinue | Out-Null",
-                WINDOWS_STARTUP_TASK_NAME
-            )
-        };
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
 
-        let output = run_hidden_powershell(&script)?;
+        let exe_path = std::env::current_exe().map_err(|e| e.to_string())?;
+        let mut cmd = Command::new("schtasks.exe");
+        if enabled {
+            let task_run = format!("{} --minimized", quote_windows_arg(&exe_path.to_string_lossy()));
+            cmd.args([
+                "/Create",
+                "/TN",
+                WINDOWS_STARTUP_TASK_NAME,
+                "/TR",
+                &task_run,
+                "/SC",
+                "ONLOGON",
+                "/RL",
+                "HIGHEST",
+                "/F",
+            ]);
+        } else {
+            cmd.args(["/Delete", "/TN", WINDOWS_STARTUP_TASK_NAME, "/F"]);
+        }
+
+        let output = cmd
+            .creation_flags(CREATE_NO_WINDOW)
+            .output()
+            .map_err(|e| e.to_string())?;
         if output.status.success() {
             return Ok(());
         }
@@ -343,7 +334,10 @@ Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Se
         if !stdout.is_empty() {
             return Err(stdout);
         }
-        return Err("Failed to update scheduled startup task".into());
+        if !enabled {
+            return Ok(());
+        }
+        return Err("Failed to update scheduled startup task. Run DevStack as Administrator.".into());
     }
 
     #[cfg(not(target_os = "windows"))]
@@ -355,50 +349,38 @@ Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Se
 
 #[cfg(target_os = "windows")]
 fn sync_hosts_entry(domain: &str, present: bool) -> Result<(), String> {
-    let hosts_path = "C:\\Windows\\System32\\drivers\\etc\\hosts".replace('\'', "''");
-    let entry = format!("127.0.0.1 {}", domain).replace('\'', "''");
-    let mode = if present { "present" } else { "absent" };
-    let script = format!(
-        r#"
-$path = '{hosts_path}'
-$entry = '{entry}'
-$mode = '{mode}'
-$bytes = [System.IO.File]::ReadAllBytes($path)
+    let hosts_path = Path::new("C:\\Windows\\System32\\drivers\\etc\\hosts");
+    let entry = format!("127.0.0.1 {}", domain);
+    let bytes = fs::read(hosts_path).map_err(|e| e.to_string())?;
+    let mut content = String::from_utf8_lossy(strip_utf8_bom(&bytes)).to_string();
 
-if ($bytes.Length -ge 4 -and $bytes[0] -eq 0xFF -and $bytes[1] -eq 0xFE -and $bytes[2] -eq 0x00 -and $bytes[3] -eq 0x00) {{
-    $encoding = [System.Text.Encoding]::UTF32
-}} elseif ($bytes.Length -ge 4 -and $bytes[0] -eq 0x00 -and $bytes[1] -eq 0x00 -and $bytes[2] -eq 0xFE -and $bytes[3] -eq 0xFF) {{
-    $encoding = [System.Text.Encoding]::GetEncoding('utf-32BE')
-}} elseif ($bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF) {{
-    $encoding = New-Object System.Text.UTF8Encoding($true)
-}} elseif ($bytes.Length -ge 2 -and $bytes[0] -eq 0xFF -and $bytes[1] -eq 0xFE) {{
-    $encoding = [System.Text.Encoding]::Unicode
-}} elseif ($bytes.Length -ge 2 -and $bytes[0] -eq 0xFE -and $bytes[1] -eq 0xFF) {{
-    $encoding = [System.Text.Encoding]::BigEndianUnicode
-}} else {{
-    $encoding = [System.Text.Encoding]::Default
-}}
+    if present {
+        let exists = content.lines().any(|line| line.trim() == entry);
+        if !exists {
+            if !content.is_empty() && !content.ends_with('\n') {
+                content.push_str("\r\n");
+            }
+            content.push_str(&entry);
+            content.push_str("\r\n");
+        }
+    } else {
+        let mut lines = content
+            .lines()
+            .filter(|line| line.trim() != entry)
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>();
+        content = lines.join("\r\n");
+        if !content.is_empty() {
+            content.push_str("\r\n");
+        }
+    }
 
-$content = $encoding.GetString($bytes)
-
-if ($mode -eq 'present') {{
-    if (-not [regex]::IsMatch($content, '(?m)^' + [regex]::Escape($entry) + '$')) {{
-        if ($content.Length -gt 0 -and -not ($content.EndsWith("`r`n") -or $content.EndsWith("`n"))) {{
-            $content += "`r`n"
-        }}
-        $content += $entry + "`r`n"
-        [System.IO.File]::WriteAllText($path, $content, $encoding)
-    }}
-}} else {{
-    $updated = [regex]::Replace($content, '(?m)^' + [regex]::Escape($entry) + '\r?\n?', '')
-    if ($updated -ne $content) {{
-        [System.IO.File]::WriteAllText($path, $updated, $encoding)
-    }}
-}}
-"#
-    );
-
-    run_elevated_powershell(&script)
+    let mut out = Vec::new();
+    if has_utf8_bom(&bytes) {
+        out.extend_from_slice(&[0xEF, 0xBB, 0xBF]);
+    }
+    out.extend_from_slice(content.as_bytes());
+    fs::write(hosts_path, out).map_err(|e| format!("Cannot update hosts file. Run DevStack as Administrator: {}", e))
 }
 
 fn copy_first_existing_template(dest_path: &Path, target_name: &str, candidates: &[&str]) -> Result<bool, String> {
@@ -1036,35 +1018,23 @@ fn kill_process_by_port_admin(port: u16) -> bool {
             return false;
         };
 
-        let ps_cmd = format!(
-            "Start-Process taskkill -ArgumentList '/PID {} /F' -Verb RunAs -Wait -WindowStyle Hidden",
-            pid
-        );
-
-        let mut utf16_bytes = Vec::new();
-        for utf16_char in ps_cmd.encode_utf16() {
-            utf16_bytes.extend_from_slice(&utf16_char.to_le_bytes());
+        if is_app_elevated() {
+            return Command::new("taskkill.exe")
+                .args(["/PID", &pid.to_string(), "/F"])
+                .creation_flags(CREATE_NO_WINDOW)
+                .status()
+                .map(|status| status.success())
+                .unwrap_or(false);
         }
-        use base64::{Engine as _, engine::general_purpose};
-        let encoded_ps_cmd = general_purpose::STANDARD.encode(utf16_bytes);
 
-        match Command::new("powershell")
-            .args(&[
-                "-NoProfile",
-                "-WindowStyle",
-                "Hidden",
-                "-Command",
-                &format!(
-                    "Start-Process powershell -ArgumentList \"-NoProfile -WindowStyle Hidden -EncodedCommand {}\" -Verb RunAs -Wait",
-                    encoded_ps_cmd
-                ),
-            ])
-            .creation_flags(CREATE_NO_WINDOW)
-            .status()
-        {
-            Ok(status) => status.success(),
-            Err(_) => false,
-        }
+        shell_execute(
+            "runas",
+            "taskkill.exe",
+            Some(&format!("/PID {} /F", pid)),
+            None,
+            0,
+        )
+        .is_ok()
     }
     #[cfg(not(target_os = "windows"))]
     { false }
@@ -1286,34 +1256,199 @@ fn get_php_ini_extensions(ini_path: String) -> Result<Vec<String>, String> {
 /// Enable common PHP extensions in php.ini (uncomments them if commented out)
 #[tauri::command]
 fn patch_php_ini_extensions(ini_path: String) -> bool {
-    let exts = ["curl", "mbstring", "openssl", "pdo_mysql", "mysqli", "gd", "zip", "intl", "xml", "bcmath", "fileinfo", "sockets", "exif"];
+    let exts = [
+        "bcmath",
+        "curl",
+        "exif",
+        "fileinfo",
+        "gd",
+        "gettext",
+        "intl",
+        "mbstring",
+        "mysqli",
+        "openssl",
+        "pdo_mysql",
+        "soap",
+        "sockets",
+        "sodium",
+        "zip",
+    ];
     let content = match std::fs::read_to_string(&ini_path) {
         Ok(c) => c,
         Err(_) => return false,
     };
-    let mut updated = content;
-    for ext in &exts {
-        let pattern = format!(r"(?m)^(\s*);(\s*extension\s*=\s*{}\s*)$", regex::escape(ext));
-        if let Ok(re) = regex::Regex::new(&pattern) {
-            updated = re.replace_all(&updated, "$1$2").to_string();
+
+    let ini_file = std::path::Path::new(&ini_path);
+    let Some(php_dir) = ini_file.parent() else {
+        return false;
+    };
+    let ext_dir = php_dir.join("ext");
+    let ext_dir_value = ext_dir.to_string_lossy().replace("/", "\\");
+    let desired_exts = exts
+        .iter()
+        .filter(|ext| ext_dir.join(format!("php_{}.dll", ext)).exists())
+        .map(|ext| ext.to_string())
+        .collect::<std::collections::HashSet<_>>();
+
+    let extension_re = match regex::Regex::new(r#"(?i)^\s*(;?)\s*extension\s*=\s*"?([^"\s;]+)"?\s*(?:;.*)?$"#) {
+        Ok(re) => re,
+        Err(_) => return false,
+    };
+    let lines = content.lines().collect::<Vec<_>>();
+    let mut parsed_exts: Vec<Option<String>> = Vec::with_capacity(lines.len());
+    let mut preferred_ext_line = std::collections::HashMap::new();
+
+    for (idx, line) in lines.iter().enumerate() {
+        let parsed = extension_re.captures(line).map(|caps| {
+            let raw = caps.get(2).map(|m| m.as_str()).unwrap_or_default();
+            let mut name = std::path::Path::new(raw)
+                .file_name()
+                .map(|value| value.to_string_lossy().to_string())
+                .unwrap_or_else(|| raw.to_string())
+                .to_lowercase();
+            name = name.trim_start_matches("php_").trim_end_matches(".dll").to_string();
+            name
+        });
+
+        if let Some(name) = parsed.as_ref() {
+            if desired_exts.contains(name) {
+                preferred_ext_line.insert(name.clone(), idx);
+            }
+        }
+        parsed_exts.push(parsed);
+    }
+
+    let mut updated_lines = Vec::new();
+    for (idx, line) in lines.iter().enumerate() {
+        if let Some(name) = parsed_exts[idx].as_ref() {
+            if desired_exts.contains(name) {
+                if preferred_ext_line.get(name) == Some(&idx) {
+                    updated_lines.push(format!("extension={}", name));
+                } else {
+                    updated_lines.push(format!(";extension={}", name));
+                }
+                continue;
+            }
+        }
+
+        updated_lines.push((*line).to_string());
+    }
+
+    let ext_dir_re = match regex::Regex::new(r#"(?i)^\s*;?\s*extension_dir\s*=.*$"#) {
+        Ok(re) => re,
+        Err(_) => return false,
+    };
+    let ext_dir_line = format!("extension_dir=\"{}\"", ext_dir_value);
+
+    let mut windows_extension_dir_idx = None;
+    for idx in 0..updated_lines.len() {
+        if idx > 0
+            && ext_dir_re.is_match(&updated_lines[idx])
+            && updated_lines[idx - 1].trim().eq_ignore_ascii_case("; On windows:")
+        {
+            windows_extension_dir_idx = Some(idx);
+            break;
         }
     }
-    // Also set sensible defaults
+
+    if windows_extension_dir_idx.is_none() {
+        windows_extension_dir_idx = updated_lines.iter().position(|line| ext_dir_re.is_match(line));
+    }
+
+    let mut normalized_lines = Vec::new();
+    let mut inserted_extension_dir = false;
+    for (idx, line) in updated_lines.into_iter().enumerate() {
+        if ext_dir_re.is_match(&line) {
+            if Some(idx) == windows_extension_dir_idx {
+                normalized_lines.push(ext_dir_line.clone());
+                inserted_extension_dir = true;
+            } else {
+                let trimmed = line.trim_start();
+                if trimmed.starts_with(';') {
+                    normalized_lines.push(line);
+                } else {
+                    normalized_lines.push(format!(";{}", line));
+                }
+            }
+            continue;
+        }
+        normalized_lines.push(line);
+    }
+
+    if !inserted_extension_dir {
+        normalized_lines.push(ext_dir_line);
+    }
+    let mut updated = normalized_lines.join("\r\n");
+
     let settings = [
-        ("upload_max_filesize", "1G"),
-        ("post_max_size", "1G"),
-        ("memory_limit", "2G"),
-        ("max_execution_time", "300"),
-        ("max_input_time", "300"),
+        ("max_execution_time", "600"),
+        ("max_input_time", "600"),
         ("max_input_vars", "10000"),
+        ("memory_limit", "2G"),
+        ("post_max_size", "1G"),
+        ("upload_max_filesize", "1G"),
     ];
     for (key, val) in &settings {
         let re_str = format!(r"(?im)^(\s*{}\s*=\s*).*$", regex::escape(key));
         if let Ok(re) = regex::Regex::new(&re_str) {
-            updated = re.replace_all(&updated, format!("${{1}}{}", val).as_str()).to_string();
+            if re.is_match(&updated) {
+                updated = re.replace_all(&updated, format!("${{1}}{}", val).as_str()).to_string();
+            } else {
+                updated.push_str("\r\n");
+                updated.push_str(&format!("{} = {}", key, val));
+            }
         }
     }
     std::fs::write(&ini_path, updated).is_ok()
+}
+
+#[tauri::command]
+fn set_php_global_path(base_dir: String, php_dir: String) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        let php_dir = std::path::Path::new(&php_dir);
+        if !php_dir.join("php.exe").exists() {
+            return Err(format!("php.exe not found at {}", php_dir.display()));
+        }
+
+        let target = php_dir.to_string_lossy().replace("/", "\\").trim_end_matches('\\').to_string();
+        let php_root = std::path::Path::new(&base_dir)
+            .join("bin")
+            .join("php")
+            .to_string_lossy()
+            .replace("/", "\\")
+            .trim_end_matches('\\')
+            .to_string();
+        let normalized_target = normalize_path_entry(&target);
+        let normalized_php_root = normalize_path_entry(&php_root);
+        let existing = read_user_path_value()?;
+        let parts = existing
+            .split(';')
+            .map(|part| part.trim())
+            .filter(|part| !part.is_empty())
+            .map(|part| part.replace("/", "\\").trim_end_matches('\\').to_string())
+            .filter(|part| {
+                let normalized = normalize_path_entry(part);
+                normalized != normalized_target
+                    && !normalized.starts_with(&normalized_php_root)
+                    && !is_php_runtime_path_entry(&normalized)
+            })
+            .collect::<Vec<_>>();
+
+        let mut new_parts = vec![target.clone()];
+        new_parts.extend(parts);
+        write_user_path_value(&new_parts.join(";"))?;
+        sync_machine_php_path(&target)?;
+        prepend_to_current_process_path(&target, &php_root);
+        broadcast_environment_change();
+        Ok(())
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = base_dir;
+        let _ = php_dir;
+        Err("Global PHP PATH management is currently only supported on Windows".into())
+    }
 }
 
 #[tauri::command]
@@ -1415,6 +1550,125 @@ fn write_user_path_value(path_value: &str) -> Result<(), String> {
         .map_err(|e| format!("Failed to open HKCU\\Environment for writing: {}", e))?;
     env.set_value("Path", &path_value)
         .map_err(|e| format!("Failed to write User PATH: {}", e))
+}
+
+#[cfg(target_os = "windows")]
+fn read_machine_path_value() -> Result<String, String> {
+    use winreg::RegKey;
+    use winreg::enums::HKEY_LOCAL_MACHINE;
+
+    let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
+    let env = hklm
+        .open_subkey("SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment")
+        .map_err(|e| format!("Failed to open HKLM Environment: {}", e))?;
+
+    match env.get_value::<String, _>("Path") {
+        Ok(path) => Ok(path),
+        Err(_) => Ok(String::new()),
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn sync_machine_php_path(target: &str) -> Result<(), String> {
+    use winreg::RegKey;
+    use winreg::enums::HKEY_LOCAL_MACHINE;
+
+    let machine_path = read_machine_path_value()?;
+    let has_php_runtime = machine_path
+        .split(';')
+        .map(normalize_path_entry)
+        .any(|part| is_php_runtime_path_entry(&part));
+
+    if !has_php_runtime {
+        return Ok(());
+    }
+
+    let normalized_target = normalize_path_entry(target);
+    let parts = machine_path
+        .split(';')
+        .map(|part| part.trim())
+        .filter(|part| !part.is_empty())
+        .map(|part| part.replace("/", "\\").trim_end_matches('\\').to_string())
+        .filter(|part| {
+            let normalized = normalize_path_entry(part);
+            normalized != normalized_target && !is_php_runtime_path_entry(&normalized)
+        })
+        .collect::<Vec<_>>();
+
+    let mut new_parts = vec![target.to_string()];
+    new_parts.extend(parts);
+    let new_path = new_parts.join(";");
+
+    let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
+    let (env, _) = hklm
+        .create_subkey("SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment")
+        .map_err(|e| {
+            format!(
+                "System PATH contains an older DevStack PHP, but DevStack is not running as Administrator so it cannot update Machine PATH: {}",
+                e
+            )
+        })?;
+    env.set_value("Path", &new_path)
+        .map_err(|e| format!("Failed to write Machine PATH: {}", e))
+}
+
+#[cfg(target_os = "windows")]
+fn normalize_path_entry(path: &str) -> String {
+    path.trim()
+        .trim_matches('"')
+        .replace("/", "\\")
+        .trim_end_matches('\\')
+        .to_lowercase()
+}
+
+#[cfg(target_os = "windows")]
+fn prepend_to_current_process_path(target: &str, remove_prefix: &str) {
+    let normalized_target = normalize_path_entry(target);
+    let normalized_prefix = normalize_path_entry(remove_prefix);
+    let current = std::env::var("PATH").unwrap_or_default();
+    let mut parts = vec![target.to_string()];
+
+    parts.extend(
+        current
+            .split(';')
+            .map(|part| part.trim())
+            .filter(|part| !part.is_empty())
+            .filter(|part| {
+                let normalized = normalize_path_entry(part);
+                normalized != normalized_target
+                    && !normalized.starts_with(&normalized_prefix)
+                    && !is_php_runtime_path_entry(&normalized)
+            })
+            .map(|part| part.to_string()),
+    );
+
+    std::env::set_var("PATH", parts.join(";"));
+}
+
+#[cfg(target_os = "windows")]
+fn is_php_runtime_path_entry(normalized_path: &str) -> bool {
+    normalized_path.contains("\\bin\\php\\php-")
+}
+
+#[cfg(target_os = "windows")]
+fn broadcast_environment_change() {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        SendMessageTimeoutW, HWND_BROADCAST, SMTO_ABORTIFHUNG, WM_SETTINGCHANGE,
+    };
+
+    let message = "Environment\0".encode_utf16().collect::<Vec<u16>>();
+    let mut result = 0usize;
+    unsafe {
+        SendMessageTimeoutW(
+            HWND_BROADCAST,
+            WM_SETTINGCHANGE,
+            0,
+            message.as_ptr() as isize,
+            SMTO_ABORTIFHUNG,
+            5000,
+            &mut result,
+        );
+    }
 }
 
 #[cfg(target_os = "windows")]
@@ -2075,6 +2329,7 @@ fn scan_processes(state: tauri::State<'_, AppState>, dev_dir: String) -> Vec<ser
         let svc_type = if name.contains("mysqld") { Some("db") }
                       else if name.contains("httpd") || name.contains("apache") { Some("web") }
                       else if name.contains("redis") { Some("cache") }
+                      else if name.contains("mailpit") { Some("mail") }
                       else if name.contains("php") { Some("php") }
                       else { None };
         
@@ -2284,11 +2539,36 @@ async fn install_binary(
     emit_log(&format!("Starting download for {} {}...", svc_type, version));
     
     let client = reqwest::Client::new();
-    let res = client.get(&url).send().await.map_err(|e| e.to_string())?;
-    
-    if !res.status().is_success() {
-        return Err(format!("Download failed: HTTP {}", res.status()));
+    let mut download_urls = vec![url.clone()];
+    if url.contains("downloads.php.net/~windows/releases/php-") {
+        download_urls.push(url.replace(
+            "downloads.php.net/~windows/releases/php-",
+            "downloads.php.net/~windows/releases/archives/php-",
+        ));
     }
+
+    let mut last_error = String::new();
+    let mut res = None;
+    for (idx, candidate_url) in download_urls.iter().enumerate() {
+        if idx > 0 {
+            emit_log("Primary PHP URL was not available. Trying archived PHP release...");
+        }
+
+        match client.get(candidate_url).send().await {
+            Ok(response) if response.status().is_success() => {
+                res = Some(response);
+                break;
+            }
+            Ok(response) => {
+                last_error = format!("HTTP {}", response.status());
+            }
+            Err(e) => {
+                last_error = e.to_string();
+            }
+        }
+    }
+
+    let res = res.ok_or_else(|| format!("Download failed: {}", last_error))?;
 
     let total_size = {
         let header_size = res.content_length().unwrap_or(0);
@@ -2929,6 +3209,7 @@ pub fn run() {
             ensure_apache_log_files,
             open_main_devtools,
             is_app_elevated,
+            relaunch_as_admin,
             check_app_update,
             install_app_update,
             open_external_target,
@@ -2954,6 +3235,7 @@ pub fn run() {
             disable_php_extension,
             get_php_ini_extensions,
             patch_php_ini_extensions,
+            set_php_global_path,
             fetch_apache_versions,
             fetch_php_versions,
             remove_virtual_host,
