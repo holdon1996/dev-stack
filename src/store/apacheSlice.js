@@ -2,7 +2,7 @@ import { getApacheDir, getPhpDir } from '../lib/paths';
 
 export const createApacheSlice = (set, get) => ({
     apacheVersions: [
-        { version: '2.4.66', vsRuntime: 'VS18', label: 'Latest', installed: false, active: false, installing: false, downloadUrl: 'https://www.apachelounge.com/download/VS18/binaries/httpd-2.4.66-260223-Win64-VS18.zip' },
+        { version: '2.4.68', vsRuntime: 'VS18', label: 'Latest', installed: false, active: false, installing: false, downloadUrl: 'https://www.apachelounge.com/download/VS18/binaries/httpd-2.4.68-260610-Win64-VS18.zip' },
         { version: '2.4.57', vsRuntime: 'VS16', label: 'Last VS16', installed: false, active: false, installing: false, downloadUrl: 'https://www.apachelounge.com/download/VS16/binaries/httpd-2.4.57-win64-VS16.zip' },
         { version: '2.4.23', vsRuntime: 'VC10', label: 'Last VC10 (XP/2003)', installed: false, active: false, installing: false, downloadUrl: 'https://www.apachelounge.com/download/VC10/binaries/httpd-2.4.23-win32-VC10.zip' },
     ],

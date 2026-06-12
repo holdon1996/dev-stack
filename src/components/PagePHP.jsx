@@ -35,6 +35,7 @@ const PagePHP = () => {
     detectPhpVersion();
     scanInstalledPhp();
     syncExtensionsFromActivePhp();
+    fetchPhpVersions();
   }, []);
   useEffect(() => {
     logEndRef.current?.scrollIntoView({ behavior: 'smooth' });

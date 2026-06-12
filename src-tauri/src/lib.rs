@@ -1018,13 +1018,20 @@ fn kill_process_by_port_admin(port: u16) -> bool {
             return false;
         };
 
+        // Try killing the process without UAC elevation first, in case the user has rights or UAC is off
+        let success = Command::new("taskkill.exe")
+            .args(["/PID", &pid.to_string(), "/F"])
+            .creation_flags(CREATE_NO_WINDOW)
+            .status()
+            .map(|status| status.success())
+            .unwrap_or(false);
+
+        if success {
+            return true;
+        }
+
         if is_app_elevated() {
-            return Command::new("taskkill.exe")
-                .args(["/PID", &pid.to_string(), "/F"])
-                .creation_flags(CREATE_NO_WINDOW)
-                .status()
-                .map(|status| status.success())
-                .unwrap_or(false);
+            return false;
         }
 
         shell_execute(

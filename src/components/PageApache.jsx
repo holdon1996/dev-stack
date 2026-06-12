@@ -22,6 +22,7 @@ const PageApache = () => {
   useEffect(() => {
     detectApacheVersion();
     scanInstalledApache();
+    fetchApacheVersions();
   }, []);
 
   useEffect(() => {

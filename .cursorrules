@@ -1,0 +1,10 @@
+# Cursor Rules
+
+This repository uses AGENTS.md as the shared cross-agent entry file. Follow the instructions in AGENTS.md and keep Cursor-specific notes here only when they cannot apply to Codex, Antigravity, or Claude Code.
+
+Read AGENTS.md first, then follow the shared docs under .agent/docs/.
+
+## Editor-Specific Context
+- **Frontend Language**: JavaScript (React 19, Vite, Tailwind CSS 3), *not* TypeScript. Maintain ES modules (`import`/`export`) in `.js` and `.jsx` files.
+- **Backend Language**: Rust (stable), located in `src-tauri/`.
+- **Tauri Integration**: Communication uses `@tauri-apps/api` (Tauri v2 API).
