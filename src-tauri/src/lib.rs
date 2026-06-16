@@ -2127,6 +2127,32 @@ fn patch_apache_paths(new_server_root: String, new_doc_root: String) -> Result<S
         "LoadModule include_module modules/mod_include.so",
     );
 
+    // Enable proxy modules so users can configure reverse proxies (e.g. for Vite/React dev server).
+    content = content.replace(
+        "#LoadModule proxy_module modules/mod_proxy.so",
+        "LoadModule proxy_module modules/mod_proxy.so",
+    );
+    content = content.replace(
+        "# LoadModule proxy_module modules/mod_proxy.so",
+        "LoadModule proxy_module modules/mod_proxy.so",
+    );
+    content = content.replace(
+        "#LoadModule proxy_http_module modules/mod_proxy_http.so",
+        "LoadModule proxy_http_module modules/mod_proxy_http.so",
+    );
+    content = content.replace(
+        "# LoadModule proxy_http_module modules/mod_proxy_http.so",
+        "LoadModule proxy_http_module modules/mod_proxy_http.so",
+    );
+    content = content.replace(
+        "#LoadModule proxy_wstunnel_module modules/mod_proxy_wstunnel.so",
+        "LoadModule proxy_wstunnel_module modules/mod_proxy_wstunnel.so",
+    );
+    content = content.replace(
+        "# LoadModule proxy_wstunnel_module modules/mod_proxy_wstunnel.so",
+        "LoadModule proxy_wstunnel_module modules/mod_proxy_wstunnel.so",
+    );
+
     // Ensure a global ServerName exists so Apache does not warn on startup.
     let re_server_name = regex::Regex::new(r#"(?im)^#?\s*ServerName\s+.+$"#).unwrap();
     if re_server_name.is_match(&content) {
