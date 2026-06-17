@@ -33,8 +33,12 @@ export const useStore = create(
                 phpInstalledVersions: state.phpVersions
                     .filter(v => v.installed || v.active)
                     .map(v => ({ version: v.version, installed: v.installed, active: v.active })),
-                apacheVersions: state.apacheVersions.map(v => ({ ...v, installing: false, progress: 0 })),
-                mysqlVersions: state.mysqlVersions.map(v => ({ ...v, installing: false, progress: 0 })),
+                apacheInstalledVersions: state.apacheVersions
+                    .filter(v => v.installed || v.active)
+                    .map(v => ({ version: v.version, installed: v.installed, active: v.active })),
+                mysqlInstalledVersions: state.mysqlVersions
+                    .filter(v => v.installed || v.active)
+                    .map(v => ({ version: v.version, installed: v.installed, active: v.active })),
                 locale: state.locale,
             }),
             onRehydrateStorage: () => (state) => {
@@ -48,8 +52,22 @@ export const useStore = create(
                                 : { ...v, installed: false, active: false };
                         });
                     }
-                    if (state.apacheVersions) state.apacheVersions = state.apacheVersions.map(v => ({ ...v, installed: !!v.installed, active: !!v.installed && !!v.active, installing: false, progress: 0 }));
-                    if (state.mysqlVersions) state.mysqlVersions = state.mysqlVersions.map(v => ({ ...v, installed: !!v.installed, active: !!v.installed && !!v.active, installing: false, progress: 0 }));
+                    if (state.apacheInstalledVersions?.length) {
+                        state.apacheVersions = state.apacheVersions.map(v => {
+                            const saved = state.apacheInstalledVersions.find(s => s.version === v.version);
+                            return saved
+                                ? { ...v, installed: !!saved.installed, active: !!saved.installed && !!saved.active }
+                                : { ...v, installed: false, active: false };
+                        });
+                    }
+                    if (state.mysqlInstalledVersions?.length) {
+                        state.mysqlVersions = state.mysqlVersions.map(v => {
+                            const saved = state.mysqlInstalledVersions.find(s => s.version === v.version);
+                            return saved
+                                ? { ...v, installed: !!saved.installed, active: !!saved.installed && !!saved.active }
+                                : { ...v, installed: false, active: false };
+                        });
+                    }
                 }
             },
         }

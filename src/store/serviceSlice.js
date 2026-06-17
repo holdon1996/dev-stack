@@ -441,11 +441,11 @@ export const createServiceSlice = (set, get) => ({
         await get().detectElevation?.();
         await get().syncStartOnBootSetting?.();
         await get().checkServicesRunning();
-        get().scanInstalledApache();
-        get().scanInstalledPhp();
-        get().scanInstalledMysql();
-        get().scanInstalledNode?.();
-        get().scanSites();
+        await get().scanInstalledApache();
+        await get().scanInstalledPhp();
+        await get().scanInstalledMysql();
+        await get().scanInstalledNode?.();
+        await get().scanSites();
 
         const autoMap = get().settings.autoStartMap || {};
         get().services.forEach(svc => {
