@@ -2891,27 +2891,49 @@ async fn fetch_apache_versions() -> Result<Vec<serde_json::Value>, String> {
         .build()
         .map_err(|e| e.to_string())?;
 
-    // Scrape both the current and archive pages
-    let urls = ["https://www.apachelounge.com/download/", "https://www.apachelounge.com/download/archive/"];
-    let re = regex::Regex::new(r#"href="([^"]*httpd-([\d.]+)[^"]*Win64[^"]*\.zip)""#).unwrap();
-    
+    // Scrape the current page plus version-specific/archive pages. ApacheLounge
+    // spreads older Windows builds across these folders, so only checking the
+    // top-level page can make the UI look like it has just the latest version.
+    let urls = [
+        "https://www.apachelounge.com/download/",
+        "https://www.apachelounge.com/download/archive/",
+        "https://www.apachelounge.com/download/additional/",
+        "https://www.apachelounge.com/download/VS18/",
+        "https://www.apachelounge.com/download/VS17/",
+        "https://www.apachelounge.com/download/VS16/",
+    ];
+    let re =
+        regex::Regex::new(r#"href="([^"]*httpd-([\d.]+)[^"]*Win64[^"]*\.zip)""#).unwrap();
+
     let mut seen = std::collections::HashSet::new();
     let mut results: Vec<serde_json::Value> = Vec::new();
 
     for base_url in &urls {
-        let Ok(resp) = client.get(*base_url).send().await else { continue; };
-        let Ok(html) = resp.text().await else { continue; };
+        let Ok(resp) = client.get(*base_url).send().await else {
+            continue;
+        };
+        let Ok(html) = resp.text().await else {
+            continue;
+        };
 
         for caps in re.captures_iter(&html) {
             let href = &caps[1];
             let ver = caps[2].to_string();
-            if seen.contains(&ver) { continue; }
+            if seen.contains(&ver) {
+                continue;
+            }
             seen.insert(ver.clone());
 
             let full_url = if href.starts_with("http") {
                 href.to_string()
-            } else {
+            } else if href.starts_with('/') {
                 format!("https://www.apachelounge.com{}", href)
+            } else {
+                format!(
+                    "{}/{}",
+                    base_url.trim_end_matches('/'),
+                    href.trim_start_matches('/')
+                )
             };
             results.push(serde_json::json!({ "version": ver, "url": full_url }));
         }

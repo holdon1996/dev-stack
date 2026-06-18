@@ -1,5 +1,11 @@
 import { getApacheDir, getPhpDir } from '../lib/paths';
 
+const getApacheVersionFromFolder = (folderName) => {
+    const normalized = folderName.trim().toLowerCase();
+    const match = normalized.match(/(?:^|apache-)(\d+(?:\.\d+)+)/);
+    return match?.[1] || null;
+};
+
 export const createApacheSlice = (set, get) => ({
     apacheVersions: [
         { version: '2.4.68', vsRuntime: 'VS18', label: 'Latest', installed: false, active: false, installing: false, downloadUrl: 'https://www.apachelounge.com/download/VS18/binaries/httpd-2.4.68-260610-Win64-VS18.zip' },
@@ -17,12 +23,29 @@ export const createApacheSlice = (set, get) => ({
             const folders = await invoke('list_subdirs', { path: apacheBinBase });
             set(s => {
                 const currentList = [...s.apacheVersions];
+                const consumed = new Set();
                 const updatedList = currentList.map(v => {
                     const ver = v.version.toLowerCase();
-                    const found = folders.some(f => f.toLowerCase().includes(ver));
-                    return { ...v, installed: found, active: found ? v.active : false };
+                    const folderMatch = folders.find(f => getApacheVersionFromFolder(f) === ver);
+                    if (folderMatch) {
+                        consumed.add(folderMatch);
+                        return { ...v, installed: true };
+                    }
+                    return { ...v, installed: false, active: false };
                 });
-                return { apacheVersions: updatedList };
+
+                const added = folders
+                    .filter(f => !consumed.has(f))
+                    .map(f => getApacheVersionFromFolder(f))
+                    .filter(Boolean)
+                    .filter(version => !updatedList.some(v => v.version === version))
+                    .map(version => ({ version, installed: true, active: false, installing: false }));
+
+                return {
+                    apacheVersions: [...updatedList, ...added].sort((a, b) =>
+                        b.version.localeCompare(a.version, undefined, { numeric: true })
+                    )
+                };
             });
         } catch (e) {
             console.error('scanInstalledApache failed:', e);
