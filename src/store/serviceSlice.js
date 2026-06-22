@@ -1,5 +1,11 @@
 import { getApacheDir, getMysqlDir, getRedisDir, getPhpDir } from '../lib/paths';
 
+const getVersionFromServicePath = (path, prefix) => {
+    const normalized = (path || '').replace(/\\/g, '/');
+    const match = normalized.match(new RegExp(`/${prefix}-(\\d+(?:\\.\\d+)+)(?:/|$)`, 'i'));
+    return match?.[1] || null;
+};
+
 export const createServiceSlice = (set, get) => ({
     services: [
         { id: 1, name: 'Apache (DevStack)', type: 'web', version: '—', port: 80, status: 'stopped', pid: null, memory: '—' },
@@ -121,8 +127,25 @@ export const createServiceSlice = (set, get) => ({
                 const webMatches = procList.filter(p => p.type === 'web');
                 const webProc = webMatches.find(p => p.is_devstack);
                 const isApacheRunning = !!webProc;
+                const runningApacheVersion = getVersionFromServicePath(webProc?.path, 'apache');
+                const apacheVersions = (() => {
+                    if (!runningApacheVersion) return s.apacheVersions;
+                    const hasVersion = s.apacheVersions.some(v => v.version === runningApacheVersion);
+                    const next = s.apacheVersions.map(v => ({
+                        ...v,
+                        installed: v.version === runningApacheVersion ? true : v.installed,
+                        active: v.version === runningApacheVersion
+                    }));
+
+                    if (hasVersion) return next;
+                    return [
+                        ...next,
+                        { version: runningApacheVersion, installed: true, active: true, installing: false },
+                    ].sort((a, b) => b.version.localeCompare(a.version, undefined, { numeric: true }));
+                })();
 
                 return {
+                    apacheVersions,
                     services: s.services.map((svc, i) => {
                         if (svc.type === 'php') {
                             return {

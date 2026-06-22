@@ -10,6 +10,28 @@ import { createUiSlice } from './uiSlice';
 import { createRedisSlice } from './redisSlice';
 import { createNodeSlice } from './nodeSlice';
 
+const mergePersistedVersions = (defaults, savedVersions = []) => {
+    const merged = defaults.map(v => {
+        const saved = savedVersions.find(s => s.version === v.version);
+        return saved
+            ? { ...v, installed: !!saved.installed, active: !!saved.installed && !!saved.active }
+            : { ...v, installed: false, active: false };
+    });
+
+    const localOnly = savedVersions
+        .filter(saved => !merged.some(v => v.version === saved.version))
+        .map(saved => ({
+            version: saved.version,
+            installed: !!saved.installed,
+            active: !!saved.installed && !!saved.active,
+            installing: false,
+        }));
+
+    return [...merged, ...localOnly].sort((a, b) =>
+        b.version.localeCompare(a.version, undefined, { numeric: true })
+    );
+};
+
 export const useStore = create(
     persist(
         (...a) => ({
@@ -45,28 +67,13 @@ export const useStore = create(
                 if (state) {
                     // Restore installed/active status back onto the fresh default list
                     if (state.phpInstalledVersions?.length) {
-                        state.phpVersions = state.phpVersions.map(v => {
-                            const saved = state.phpInstalledVersions.find(s => s.version === v.version);
-                            return saved
-                                ? { ...v, installed: !!saved.installed, active: !!saved.installed && !!saved.active }
-                                : { ...v, installed: false, active: false };
-                        });
+                        state.phpVersions = mergePersistedVersions(state.phpVersions, state.phpInstalledVersions);
                     }
                     if (state.apacheInstalledVersions?.length) {
-                        state.apacheVersions = state.apacheVersions.map(v => {
-                            const saved = state.apacheInstalledVersions.find(s => s.version === v.version);
-                            return saved
-                                ? { ...v, installed: !!saved.installed, active: !!saved.installed && !!saved.active }
-                                : { ...v, installed: false, active: false };
-                        });
+                        state.apacheVersions = mergePersistedVersions(state.apacheVersions, state.apacheInstalledVersions);
                     }
                     if (state.mysqlInstalledVersions?.length) {
-                        state.mysqlVersions = state.mysqlVersions.map(v => {
-                            const saved = state.mysqlInstalledVersions.find(s => s.version === v.version);
-                            return saved
-                                ? { ...v, installed: !!saved.installed, active: !!saved.installed && !!saved.active }
-                                : { ...v, installed: false, active: false };
-                        });
+                        state.mysqlVersions = mergePersistedVersions(state.mysqlVersions, state.mysqlInstalledVersions);
                     }
                 }
             },

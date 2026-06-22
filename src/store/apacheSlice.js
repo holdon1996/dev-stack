@@ -39,7 +39,10 @@ export const createApacheSlice = (set, get) => ({
                     .map(f => getApacheVersionFromFolder(f))
                     .filter(Boolean)
                     .filter(version => !updatedList.some(v => v.version === version))
-                    .map(version => ({ version, installed: true, active: false, installing: false }));
+                    .map(version => {
+                        const existing = currentList.find(v => v.version === version);
+                        return { version, installed: true, active: !!existing?.active, installing: false };
+                    });
 
                 return {
                     apacheVersions: [...updatedList, ...added].sort((a, b) =>
