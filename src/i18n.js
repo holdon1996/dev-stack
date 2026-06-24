@@ -144,6 +144,16 @@ const translations = {
     clear: 'Clear',
     waitingTunnel: 'Waiting for tunnel activity...',
     urlCopied: 'URL copied!',
+    quickTunnelMode: 'Quick tunnel',
+    customDomainMode: 'Custom domain',
+    customDomain: 'Public domain',
+    customDomainHint: 'DevStack creates the named tunnel, DNS route, and config automatically.',
+    cloudflareTunnelName: 'Tunnel name',
+    cloudflareTunnelNameHint: 'Project folder by default. Use letters, numbers, - or _.',
+    customDomainProject: 'Project to publish',
+    connectCloudflare: 'Connect Cloudflare',
+    cloudflareConnecting: 'Waiting for login...',
+    cloudflareConnected: 'Cloudflare connected',
 
     // Quick Config
     configTitle: 'Quick Config',
@@ -558,6 +568,16 @@ const translations = {
     clear: 'Xóa',
     waitingTunnel: 'Đang chờ hoạt động tunnel...',
     urlCopied: 'Đã sao chép URL!',
+    quickTunnelMode: 'Tunnel nhanh',
+    customDomainMode: 'Tên miền tùy chỉnh',
+    customDomain: 'Tên miền public',
+    customDomainHint: 'DevStack tự tạo named tunnel, DNS route và file cấu hình.',
+    cloudflareTunnelName: 'Tên tunnel',
+    cloudflareTunnelNameHint: 'Mặc định theo thư mục project. Dùng chữ, số, dấu - hoặc _.',
+    customDomainProject: 'Dự án cần public',
+    connectCloudflare: 'Kết nối Cloudflare',
+    cloudflareConnecting: 'Đang chờ đăng nhập...',
+    cloudflareConnected: 'Đã kết nối Cloudflare',
 
     // Quick Config
     configTitle: 'Cấu hình nhanh',

@@ -10,12 +10,19 @@ export const createTunnelSlice = (set, get) => ({
     tunnelLogs: [],
     tunnelInstallProgress: { pct: 0, downloaded: 0, total: 0 },
     tunnelHostHeader: '',
+    tunnelMode: 'quick',
+    tunnelCustomDomain: '',
+    tunnelCustomName: '',
+    cloudflareAuthStatus: 'unknown',
     tunnelInstalled: { cloudflare: false, ngrok: false, nport: false },
 
     setTunnelProvider: (p) => set({ tunnelProvider: p }),
     setTunnelPort: (p) => set({ tunnelPort: parseInt(p) || 80 }),
     setTunnelProtocol: (p) => set({ tunnelProtocol: p }),
     setTunnelHostHeader: (h) => set({ tunnelHostHeader: h }),
+    setTunnelMode: (mode) => set({ tunnelMode: mode }),
+    setTunnelCustomDomain: (domain) => set({ tunnelCustomDomain: domain }),
+    setTunnelCustomName: (name) => set({ tunnelCustomName: name }),
     setTunnelStatus: (status) => set({ tunnelStatus: status }),
     setTunnelUrl: (url) => set({ tunnelPublicUrl: url }),
 
@@ -32,10 +39,34 @@ export const createTunnelSlice = (set, get) => ({
 
             const cloudflareExists = await invoke('path_exists', { path: `${tunnelDir}/cloudflared.exe` });
             const ngrokExists = await invoke('path_exists', { path: `${tunnelDir}/ngrok.exe` });
+            const cloudflareAuthenticated = cloudflareExists
+                ? await invoke('cloudflare_is_authenticated')
+                : false;
 
-            set({ tunnelInstalled: { cloudflare: cloudflareExists, ngrok: ngrokExists } });
+            set({
+                tunnelInstalled: { cloudflare: cloudflareExists, ngrok: ngrokExists },
+                cloudflareAuthStatus: cloudflareAuthenticated ? 'connected' : 'disconnected'
+            });
         } catch (e) {
             console.error('checkTunnelsInstalled failed', e);
+        }
+    },
+
+    connectCloudflare: async () => {
+        const devDir = get().settings.devStackDir.replace(/\//g, '\\').replace(/[\\]+$/, '');
+        const executable = `${devDir}\\bin\\tunnels\\cloudflared.exe`;
+        set({ cloudflareAuthStatus: 'connecting' });
+        get().addTunnelLog('Opening Cloudflare authorization...', 'info');
+
+        try {
+            const { invoke } = await import('@tauri-apps/api/core');
+            await invoke('cloudflare_login', { executable });
+            set({ cloudflareAuthStatus: 'connected' });
+            get().addTunnelLog('✓ Cloudflare account connected.', 'ok');
+        } catch (error) {
+            const message = error?.message || error?.toString?.() || 'Cloudflare login failed';
+            set({ cloudflareAuthStatus: 'disconnected' });
+            get().addTunnelLog(`❌ ${message}`, 'err');
         }
     },
 
@@ -55,13 +86,23 @@ export const createTunnelSlice = (set, get) => ({
     },
 
     startTunnel: async (authToken = '') => {
-        const { tunnelProvider, tunnelPort, tunnelProtocol } = get();
+        const {
+            tunnelProvider, tunnelPort, tunnelProtocol, tunnelMode,
+            tunnelCustomDomain, tunnelCustomName, tunnelHostHeader
+        } = get();
 
         await get().stopTunnel();
 
-        const hostHeader = get().tunnelHostHeader || '';
+        const hostHeader = tunnelHostHeader || '';
+        const isCustomCloudflare = tunnelProvider === 'cloudflare' && tunnelMode === 'custom';
+        if (isCustomCloudflare && (!hostHeader || !tunnelCustomDomain.trim() || !tunnelCustomName.trim())) {
+            get().addTunnelLog('Select a project, tunnel name, and custom domain first.', 'warn');
+            return;
+        }
         set({ tunnelStatus: 'starting', tunnelPublicUrl: '' });
-        const targetDesc = hostHeader ? hostHeader : `${tunnelProtocol}://localhost:${tunnelPort}`;
+        const targetDesc = isCustomCloudflare
+            ? `${tunnelCustomDomain.trim()} → ${hostHeader}`
+            : hostHeader || `${tunnelProtocol}://localhost:${tunnelPort}`;
         get().addTunnelLog(`Starting ${tunnelProvider} on ${targetDesc}...`, 'info');
 
         const devDir = get().settings.devStackDir.replace(/\//g, '\\').replace(/[\\]+$/, '');
@@ -121,8 +162,25 @@ export const createTunnelSlice = (set, get) => ({
 
             let args = [];
             if (tunnelProvider === 'cloudflare') {
-                args = ['tunnel', '--url', `${tunnelProtocol}://localhost:${tunnelPort}`];
-                if (hostHeader) args.push('--http-host-header', hostHeader);
+                if (isCustomCloudflare) {
+                    const prepared = await invoke('prepare_cloudflare_tunnel', {
+                        executable: exePath,
+                        domain: tunnelCustomDomain,
+                        tunnelName: tunnelCustomName,
+                        protocol: tunnelProtocol,
+                        port: tunnelPort,
+                        hostHeader
+                    });
+                    args = ['tunnel', '--config', prepared.configPath, 'run', prepared.tunnelName];
+                    set({ tunnelPublicUrl: prepared.publicUrl });
+                    get().addTunnelLog(`Using config: ${prepared.configPath}`, 'info');
+                    if (prepared.dnsRouteUpdated) {
+                        get().addTunnelLog('DNS now points to this project tunnel. Older tunnels were not deleted.', 'warn');
+                    }
+                } else {
+                    args = ['tunnel', '--url', `${tunnelProtocol}://localhost:${tunnelPort}`];
+                    if (hostHeader) args.push('--http-host-header', hostHeader);
+                }
             } else if (tunnelProvider === 'ngrok') {
                 if (authToken) {
                     await invoke('start_detached_process', { executable: exePath, args: ['config', 'add-authtoken', authToken] });
@@ -136,6 +194,11 @@ export const createTunnelSlice = (set, get) => ({
                 args,
                 eventPrefix
             });
+
+            if (isCustomCloudflare) {
+                set({ tunnelStatus: 'running' });
+                get().addTunnelLog(`✓ Tunnel established: https://${tunnelCustomDomain.trim()}`, 'ok');
+            }
 
         } catch (e) {
 

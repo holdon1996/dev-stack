@@ -61,6 +61,10 @@ export const useStore = create(
                 mysqlInstalledVersions: state.mysqlVersions
                     .filter(v => v.installed || v.active)
                     .map(v => ({ version: v.version, installed: v.installed, active: v.active })),
+                tunnelMode: state.tunnelMode,
+                tunnelCustomDomain: state.tunnelCustomDomain,
+                tunnelCustomName: state.tunnelCustomName,
+                tunnelHostHeader: state.tunnelHostHeader,
                 locale: state.locale,
             }),
             onRehydrateStorage: () => (state) => {

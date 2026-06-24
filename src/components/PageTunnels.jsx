@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useStore } from '../store';
 import { Copy, Play, Square, Download, Check, Loader, ExternalLink, Radio, Trash2 } from 'lucide-react';
+import CloudflareTunnelMode, { getDefaultTunnelName } from './CloudflareTunnelMode';
 
 const providers = [
   {
@@ -26,7 +27,8 @@ const PageTunnels = () => {
   const {
     tunnelProvider, tunnelStatus, tunnelPublicUrl, tunnelPort, tunnelProtocol,
     tunnelLogs, tunnelInstalled, tunnelHostHeader, sites, tunnelInstallProgress,
-    setTunnelProvider, setTunnelPort, setTunnelProtocol, setTunnelHostHeader,
+    tunnelMode, tunnelCustomDomain, tunnelCustomName, cloudflareAuthStatus,
+    setTunnelProvider, setTunnelPort, setTunnelProtocol, setTunnelHostHeader, setTunnelCustomName,
     startTunnel, stopTunnel, installTunnelBinary, clearTunnelLogs, showToast, t, checkTunnelsInstalled
   } = useStore();
 
@@ -54,6 +56,19 @@ const PageTunnels = () => {
   };
 
   const isBusy = tunnelStatus === 'starting' || tunnelStatus === 'installing';
+  const isCustomCloudflare = tunnelProvider === 'cloudflare' && tunnelMode === 'custom';
+  const isTunnelNameValid = /^[a-zA-Z0-9_-]{1,100}$/.test(tunnelCustomName.trim());
+  const isCustomReady = !isCustomCloudflare || Boolean(
+    tunnelHostHeader && isTunnelNameValid && tunnelCustomDomain.trim()
+      && cloudflareAuthStatus === 'connected'
+  );
+
+  const selectProject = (domain) => {
+    setTunnelHostHeader(domain);
+    if (isCustomCloudflare) {
+      setTunnelCustomName(getDefaultTunnelName(sites.find(site => site.domain === domain)));
+    }
+  };
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
@@ -97,6 +112,13 @@ const PageTunnels = () => {
         <div className="bg-surface border border-border rounded-xl p-5">
           <div className="text-[11px] font-bold text-muted tracking-[0.08em] uppercase mb-4">{t('configuration')}</div>
 
+          {tunnelProvider === 'cloudflare' && (
+            <CloudflareTunnelMode
+              disabled={tunnelStatus !== 'stopped'}
+              isInstalled={isInstalled}
+            />
+          )}
+
           <div className={`grid gap-4 mb-5 ${currentProvider?.needsAuth ? 'grid-cols-3' : 'grid-cols-2'}`}>
             <div className="flex flex-col gap-1.5">
               <label className="text-[12px] font-semibold text-textDim">{t('localPort')}</label>
@@ -115,7 +137,7 @@ const PageTunnels = () => {
               >
                 <option value="http">HTTP</option>
                 <option value="https">HTTPS</option>
-                <option value="tcp">TCP</option>
+                {!isCustomCloudflare && <option value="tcp">TCP</option>}
               </select>
             </div>
             {currentProvider?.needsAuth && (
@@ -133,13 +155,13 @@ const PageTunnels = () => {
           {/* Host Header selector - maps tunnel to a specific vhost */}
           <div className="mb-5 flex flex-col gap-1.5">
             <label className="text-[12px] font-semibold text-textDim flex items-center gap-1.5">
-              {t('pointToProject')}
+              {t(isCustomCloudflare ? 'customDomainProject' : 'pointToProject')}
               <span className="text-[10px] text-muted font-normal">{t('serveVhostDesc')}</span>
             </label>
             <select
               className="select-field"
               value={tunnelHostHeader}
-              onChange={(e) => setTunnelHostHeader(e.target.value)}
+              onChange={(e) => selectProject(e.target.value)}
               disabled={tunnelStatus !== 'stopped'}
             >
               <option value="">{t('noVhostSelected')}</option>
@@ -169,7 +191,7 @@ const PageTunnels = () => {
             ) : (
               <button
                 className="btn-primary flex items-center gap-2"
-                onClick={() => startTunnel(authToken)} disabled={isBusy}
+                onClick={() => startTunnel(authToken)} disabled={isBusy || !isCustomReady}
               >
                 {tunnelStatus === 'starting'
                   ? <><Loader size={14} className="animate-spin" /> {t('connectingProtocol')}</>

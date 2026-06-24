@@ -19,6 +19,11 @@ use std::process::Command;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 use tauri_plugin_updater::{Update as TauriPendingUpdate, UpdaterExt};
 
+mod cloudflare_tunnel;
+use cloudflare_tunnel::{
+    cloudflare_is_authenticated, cloudflare_login, prepare_cloudflare_tunnel,
+};
+
 #[cfg(target_os = "windows")]
 const WINDOWS_STARTUP_TASK_NAME: &str = "DevStack Startup";
 const APP_UPDATE_API_URL: &str = "https://api.github.com/repos/holdon1996/dev-stack/releases/latest";
@@ -3298,6 +3303,9 @@ pub fn run() {
             stream_log_file,
             run_mkcert,
             spawn_command_stream,
+            cloudflare_is_authenticated,
+            cloudflare_login,
+            prepare_cloudflare_tunnel,
             download_file,
             download_file_with_progress
         ])
