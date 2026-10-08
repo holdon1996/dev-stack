@@ -1,7 +1,7 @@
 import React from 'react';
 import { useStore } from '../store';
 import packageJson from '../../package.json';
-import { Layout, Globe, Database, Code, FileText, Settings, Radio, FileCode, Server, Boxes, Mail } from 'lucide-react';
+import { Layout, Globe, Database, Code, FileText, Settings, Radio, FileCode, Server, Boxes, Mail, Globe2 } from 'lucide-react';
 
 const Sidebar = () => {
   const { activePage, setActivePage, systemStats, t } = useStore();
@@ -10,6 +10,7 @@ const Sidebar = () => {
   const navItems = [
     { id: 'services', label: t('services'), icon: Layout },
     { id: 'sites', label: t('virtualHosts'), icon: Globe },
+    { id: 'domains', label: t('domains'), icon: Globe2 },
     { id: 'apache', label: t('apache'), icon: Server },
     { id: 'database', label: t('database'), icon: Database },
     { id: 'php', label: t('phpRuntime'), icon: Code },

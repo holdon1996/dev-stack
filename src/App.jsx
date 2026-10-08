@@ -12,6 +12,7 @@ import PageQuickConfig from './components/PageQuickConfig';
 import PageApache from './components/PageApache';
 import PageNode from './components/PageNode';
 import PageMailServer from './components/PageMailServer';
+import PageDomains from './components/PageDomains';
 import Toast from './components/Toast';
 import Modal from './components/Modal';
 import { X, Minus, Maximize2 } from 'lucide-react';
@@ -108,6 +109,7 @@ function App() {
         <main className="flex-1 min-h-0 flex flex-col bg-[#13151a] overflow-hidden">
           {activePage === 'services' && <PageServices />}
           {activePage === 'sites' && <PageSites />}
+          {activePage === 'domains' && <PageDomains />}
           {activePage === 'database' && <PageDatabase />}
           {activePage === 'php' && <PagePHP />}
           {activePage === 'apache' && <PageApache />}

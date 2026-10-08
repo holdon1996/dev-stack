@@ -1,12 +1,47 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useStore } from '../store';
-import { ExternalLink, Folder, Trash2, Lock, Unlock, Link } from 'lucide-react';
-import { Command } from '@tauri-apps/plugin-shell';
+import { ExternalLink, Folder, Trash2, Lock, Link, Settings2, Terminal, Play, Square, RotateCcw, AlertTriangle } from 'lucide-react';
+import SiteConfigModal from './SiteConfigModal';
+import { siteProcesses } from '../lib/sites';
+
+export const ConfigStaleBadge = () => {
+  const { apacheConfigStale, restartApache, t } = useStore();
+  if (!apacheConfigStale) return null;
+  return (
+    <button
+      type="button"
+      className="flex items-center gap-1.5 text-[11px] font-bold text-warn bg-warn/10 border border-warn/30 rounded-lg px-2.5 py-1 hover:bg-warn/20"
+      onClick={() => restartApache()}
+      title={t('restartApache')}
+    >
+      <AlertTriangle size={12} /> {t('configChangedRestart')}
+    </button>
+  );
+};
+
+const GroupBar = () => {
+  const { groupNames, startGroup, stopGroup, restartGroup, t } = useStore();
+  const groups = groupNames();
+  if (!groups.length) return null;
+  return (
+    <div className="flex flex-wrap gap-2 mb-4">
+      {groups.map(group => (
+        <div key={group} className="flex items-center gap-1 bg-surface border border-border rounded-lg pl-3 pr-1 py-1">
+          <span className="text-[12px] font-bold mr-2">{group}</span>
+          <button type="button" className="btn-ghost p-1.5 text-accent" title={t('groupStart')} onClick={() => startGroup(group)}><Play size={12} /></button>
+          <button type="button" className="btn-ghost p-1.5" title={t('groupRestart')} onClick={() => restartGroup(group)}><RotateCcw size={12} /></button>
+          <button type="button" className="btn-ghost p-1.5 text-danger" title={t('groupStop')} onClick={() => stopGroup(group)}><Square size={12} /></button>
+        </div>
+      ))}
+    </div>
+  );
+};
 
 const PageSites = () => {
-  const { sites, removeSite, scanSites, showToast, t } = useStore();
-  const [isCreating, setIsCreating] = React.useState(false);
-  const [projectName, setProjectName] = React.useState('');
+  const { sites, scanSites, showToast, t, siteConfigs, procs, siteProcessId, enableSite, siteApplying } = useStore();
+  const [isCreating, setIsCreating] = useState(false);
+  const [projectName, setProjectName] = useState('');
+  const [editing, setEditing] = useState(null);
 
   useEffect(() => {
     scanSites();
@@ -34,17 +69,20 @@ const PageSites = () => {
     }
   };
 
-  const openFolder = async (site) => {
-    useStore.getState().openExplorer(site.path);
+  const runningCount = (site) => {
+    const cfg = siteConfigs[site.key];
+    if (!cfg?.managed) return 0;
+    return siteProcesses(cfg).filter(p => procs[siteProcessId(site, p)]?.running).length;
   };
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
-      <div className="px-6 py-5 border-b border-[#1a1c22] flex items-center bg-bg">
+      <div className="px-6 py-5 border-b border-[#1a1c22] flex items-center bg-bg gap-3">
         <div className="flex-1">
           <h1 className="text-[18px] font-extrabold m-0">{t('vhostsTitle')}</h1>
           <p className="text-[12px] text-muted m-0 mt-1 font-mono">{t('vhostsDesc')}</p>
         </div>
+        <ConfigStaleBadge />
         <div className="flex gap-2 items-center">
           {isCreating ? (
             <div className="flex items-center gap-2 animate-in fade-in slide-in-from-right-4 duration-200">
@@ -79,12 +117,6 @@ const PageSites = () => {
             <>
               <button
                 className="btn-ghost flex items-center gap-2 border border-border text-[12px] py-1.5 px-3"
-                onClick={() => useStore.getState().openConfigFile('hosts')}
-              >
-                {t('openHostsFile')}
-              </button>
-              <button
-                className="btn-ghost flex items-center gap-2 border border-border text-[12px] py-1.5 px-3"
                 onClick={async () => {
                   const { apacheVersions, settings, showToast } = useStore.getState();
                   const activeApache = apacheVersions.find(v => v.active && v.installed);
@@ -114,74 +146,97 @@ const PageSites = () => {
       </div>
 
       <div className="flex-1 overflow-y-auto p-5 px-6">
+        <GroupBar />
         <div className="bg-surface border border-border rounded-xl overflow-hidden">
-          <div className="px-4.5 py-3.5 border-b border-border grid grid-cols-[2fr_3fr_60px_100px] gap-3 text-[11px] text-muted font-bold tracking-widest uppercase bg-surface">
+          <div className="px-4.5 py-3.5 border-b border-border grid grid-cols-[2fr_90px_2fr_70px_150px] gap-3 text-[11px] text-muted font-bold tracking-widest uppercase bg-surface">
             <span>{t('domain')}</span>
+            <span>{t('siteType')}</span>
             <span>{t('rootPath')}</span>
-            <span className="whitespace-nowrap">{t('action')}</span>
-            <span></span>
+            <span>{t('processesShort')}</span>
+            <span className="text-right">{t('action')}</span>
           </div>
 
           <div className="flex flex-col">
-            {sites.map(site => (
-              <div key={site.id} className="service-row grid grid-cols-[2fr_3fr_60px_100px] gap-3 items-center">
-                <div
-                  className="text-[13px] font-bold text-info font-mono truncate cursor-pointer hover:text-accent hover:underline flex items-center gap-1.5"
-                  onClick={() => openInBrowser(site)}
-                >
-                  {site.ssl ? 'https' : 'http'}://{site.domain} <ExternalLink size={12} />
+            {sites.map(site => {
+              const cfg = siteConfigs[site.key];
+              const managed = !!cfg?.managed;
+              const running = runningCount(site);
+              return (
+                <div key={site.id} className="service-row grid grid-cols-[2fr_90px_2fr_70px_150px] gap-3 items-center">
+                  <div className="min-w-0">
+                    <div
+                      className="text-[13px] font-bold text-info font-mono truncate cursor-pointer hover:text-accent hover:underline flex items-center gap-1.5"
+                      onClick={() => openInBrowser(site)}
+                    >
+                      {site.ssl && <Lock size={12} className="text-accent shrink-0" />}
+                      {site.ssl ? 'https' : 'http'}://{site.domain} <ExternalLink size={12} className="shrink-0" />
+                    </div>
+                    {managed && cfg.aliases?.length > 0 && (
+                      <div className="text-[10px] text-muted font-mono truncate">{cfg.aliases.join(', ')}</div>
+                    )}
+                    {managed && cfg.group && <div className="text-[10px] text-textDim">{cfg.group}</div>}
+                  </div>
+                  <div>
+                    {managed
+                      ? <span className="tag font-mono text-[10px]">{cfg.type}{cfg.type === 'proxy' ? `:${cfg.proxyPort}` : ''}</span>
+                      : <span className="text-[10px] text-muted">{t('notManaged')}</span>}
+                  </div>
+                  <div className="text-[12px] text-muted font-mono truncate" title={site.path}>
+                    {site.path}{managed && cfg.docRoot ? <span className="text-textDim">/{cfg.docRoot}</span> : null}
+                  </div>
+                  <div className="text-[11px] font-mono">
+                    {running > 0 ? <span className="text-accent">● {running}</span> : <span className="text-muted">—</span>}
+                  </div>
+                  <div className="flex gap-1.5 justify-end">
+                    {!managed && (
+                      <button
+                        className="btn-ghost p-1.5 text-accent"
+                        title={t('createVhostSync')}
+                        disabled={siteApplying}
+                        onClick={() => enableSite(site)}
+                      >
+                        <Link size={14} />
+                      </button>
+                    )}
+                    <button className="btn-ghost p-1.5" title={t('siteSettings')} onClick={() => setEditing(site)}>
+                      <Settings2 size={14} />
+                    </button>
+                    <button className="btn-ghost p-1.5" title={t('openTerminal')} onClick={() => useStore.getState().openTerminal(site.path)}>
+                      <Terminal size={14} />
+                    </button>
+                    <button className="btn-ghost p-1.5" title={t('openFolder')} onClick={() => useStore.getState().openExplorer(site.path)}>
+                      <Folder size={14} />
+                    </button>
+                    <button
+                      className="btn-danger p-1.5 border-none"
+                      title={t('remove')}
+                      onClick={async () => {
+                        const { confirm } = await import('@tauri-apps/plugin-dialog');
+                        const yes = await confirm(
+                          t('deleteHostConfirm', { domain: site.domain }) + '\n\n' + t('deleteProjectWarning'),
+                          { title: t('deleteProjectTitle'), kind: 'warning' }
+                        );
+                        if (yes) {
+                          await useStore.getState().removeSite(site.id, site.domain, site.path);
+                          showToast(t('hostRemoved'), 'warn');
+                        }
+                      }}
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
                 </div>
-                <div className="text-[12px] text-muted font-mono truncate" title={site.path}>
-                  {site.path}
-                </div>
-                {/* <div
-                  className="flex justify-center cursor-pointer hover:scale-110 transition-transform"
-                  onClick={() => useStore.getState().toggleSiteSSL(site.id)}
-                  title={site.ssl ? t('clickToDisableHttps') : t('clickToEnableHttps')}
-                >
-                  {site.ssl ? <Lock size={16} className="text-accent" /> : <Unlock size={16} className="text-muted" />}
-                </div> */}
-                <div className="flex gap-1.5 justify-end">
-                  <button
-                    className="btn-ghost p-1.5 text-accent"
-                    title={t('createVhostSync')}
-                    onClick={() => useStore.getState().setupVirtualHost(site)}
-                  >
-                    <Link size={14} />
-                  </button>
-                  <button
-                    className="btn-ghost p-1.5"
-                    title={t('openFolder')}
-                    onClick={() => openFolder(site)}
-                  >
-                    <Folder size={14} />
-                  </button>
-                  <button
-                    className="btn-danger p-1.5 border-none"
-                    onClick={async () => {
-                      const { confirm } = await import('@tauri-apps/plugin-dialog');
-                      const yes = await confirm(
-                        t('deleteHostConfirm', { domain: site.domain }) + '\\n\\nCẢNH BÁO: Hành động này sẽ xoá luôn thư mục mã nguồn và dữ liệu bên trong!',
-                        { title: 'Xác nhận xóa dự án', kind: 'warning' }
-                      );
-                      if (yes) {
-                        await useStore.getState().removeSite(site.id, site.domain, site.path);
-                        showToast(t('hostRemoved'), 'warn');
-                      }
-                    }}
-                  >
-                    <Trash2 size={14} />
-                  </button>
-                </div>
-              </div>
-            ))}
+              );
+            })}
             {sites.length === 0 && (
               <div className="p-10 text-center text-muted italic">{t('noHosts')}</div>
             )}
           </div>
         </div>
       </div>
-    </div >
+
+      {editing && <SiteConfigModal site={editing} onClose={() => setEditing(null)} />}
+    </div>
   );
 };
 

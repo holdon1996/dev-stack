@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useStore } from '../store';
-import { Copy, Play, Square, Download, Check, Loader, ExternalLink, Radio, Trash2 } from 'lucide-react';
+import { Copy, Play, Square, Download, Check, Loader, ExternalLink, Radio, Trash2, AlertTriangle } from 'lucide-react';
 import CloudflareTunnelMode, { getDefaultTunnelName } from './CloudflareTunnelMode';
 
 const providers = [
@@ -29,7 +29,8 @@ const PageTunnels = () => {
     tunnelLogs, tunnelInstalled, tunnelHostHeader, sites, tunnelInstallProgress,
     tunnelMode, tunnelCustomDomain, tunnelCustomName, cloudflareAuthStatus,
     setTunnelProvider, setTunnelPort, setTunnelProtocol, setTunnelHostHeader, setTunnelCustomName,
-    startTunnel, stopTunnel, installTunnelBinary, clearTunnelLogs, showToast, t, checkTunnelsInstalled
+    startTunnel, stopTunnel, installTunnelBinary, clearTunnelLogs, showToast, t, checkTunnelsInstalled,
+    siteConfigs, tunnelRoutes, setTunnelCustomDomain, tunnelProbePath, setTunnelProbePath
   } = useStore();
 
   const [copied, setCopied] = useState(false);
@@ -63,10 +64,20 @@ const PageTunnels = () => {
       && cloudflareAuthStatus === 'connected'
   );
 
+  const selectedSite = sites.find(site => site.domain === tunnelHostHeader);
+  const exposesViteSource = siteConfigs[selectedSite?.key]?.type === 'proxy';
+  const originUrl = tunnelProtocol === 'tcp' ? `tcp://localhost:${tunnelPort}` : `${tunnelPort === 443 ? 'https' : 'http'}://localhost:${tunnelPort}`;
+
   const selectProject = (domain) => {
     setTunnelHostHeader(domain);
     if (isCustomCloudflare) {
-      setTunnelCustomName(getDefaultTunnelName(sites.find(site => site.domain === domain)));
+      const site = sites.find(s => s.domain === domain);
+      const route = tunnelRoutes.find(r => r.siteKey === site?.key);
+      setTunnelCustomName(route?.tunnelName || getDefaultTunnelName(site));
+      if (route) {
+        setTunnelCustomDomain(route.hostname);
+        setTunnelPort(route.port);
+      }
     }
   };
 
@@ -129,16 +140,17 @@ const PageTunnels = () => {
               />
             </div>
             <div className="flex flex-col gap-1.5">
-              <label className="text-[12px] font-semibold text-textDim">{t('protocol')}</label>
+              <label htmlFor="tunnel-origin" className="text-[12px] font-semibold text-textDim">{t('originConnection')}</label>
               <select
-                className="select-field" value={tunnelProtocol}
+                id="tunnel-origin"
+                className="select-field" value={tunnelProtocol === 'tcp' ? 'tcp' : 'http'}
                 onChange={(e) => setTunnelProtocol(e.target.value)}
                 disabled={tunnelStatus !== 'stopped'}
               >
-                <option value="http">HTTP</option>
-                <option value="https">HTTPS</option>
+                <option value="http">{t('originAuto')}</option>
                 {!isCustomCloudflare && <option value="tcp">TCP</option>}
               </select>
+              <span className="text-[10px] text-muted font-mono">{originUrl} · {t('publicAlwaysHttps')}</span>
             </div>
             {currentProvider?.needsAuth && (
               <div className="flex flex-col gap-1.5">
@@ -169,7 +181,46 @@ const PageTunnels = () => {
                 <option key={site.id} value={site.domain}>{site.domain} → {site.path}</option>
               ))}
             </select>
+            {exposesViteSource && (
+              <div className="flex items-start gap-2 text-[11px] text-warn mt-1">
+                <AlertTriangle size={13} className="shrink-0 mt-0.5" /> {t('viteSourceExposedWarn')}
+              </div>
+            )}
           </div>
+
+          {tunnelProvider === 'cloudflare' && (
+            <div className="mb-5 flex flex-col gap-1.5">
+              <label htmlFor="tunnel-probe-path" className="text-[12px] font-semibold text-textDim">{t('tunnelProbePath')}</label>
+              <input
+                id="tunnel-probe-path"
+                className="input-field font-mono text-[12px]"
+                value={tunnelProbePath}
+                onChange={(e) => setTunnelProbePath(e.target.value)}
+                placeholder="/whatsapp/webhook?hub.mode=subscribe&hub.challenge=ping"
+                disabled={tunnelStatus !== 'stopped'}
+                spellCheck={false}
+              />
+              <span className="text-[10px] text-muted">{t('tunnelProbePathHint')}</span>
+            </div>
+          )}
+
+          {isCustomCloudflare && tunnelRoutes.length > 0 && (
+            <div className="mb-5">
+              <div className="text-[12px] font-semibold text-textDim mb-1.5">{t('tunnelRoutesTitle')}</div>
+              <div className="flex flex-col gap-1">
+                {tunnelRoutes.map(route => (
+                  <div key={route.hostname} className="grid grid-cols-[1fr_1fr_120px_auto] gap-2 items-center text-[11px] font-mono">
+                    <span className="text-accent truncate">https://{route.hostname}</span>
+                    <span className="truncate">→ {route.siteKey} ({route.hostHeader}:{route.port})</span>
+                    <span className="text-muted truncate">{route.tunnelName}</span>
+                    <button type="button" className="btn-danger p-1 border-none" aria-label={t('remove')} disabled={tunnelStatus !== 'stopped'} onClick={() => useStore.getState().removeTunnelRoute(route.hostname)}>
+                      <Trash2 size={11} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Actions Row */}
           <div className="flex items-center gap-3">

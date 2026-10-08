@@ -1,10 +1,12 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useStore } from '../store';
 import { Trash2, RefreshCw } from 'lucide-react';
+import ProjectLogs from './ProjectLogs';
 
 const PageLogs = () => {
   const { logs, currentLog, switchLog, clearLog, showToast, t, fetchServiceLogs, streamServiceLogs } = useStore();
   const scrollRef = useRef(null);
+  const [projectMode, setProjectMode] = useState(false);
 
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
@@ -42,15 +44,21 @@ const PageLogs = () => {
           {tabs.map(tab => (
             <div
               key={tab.id}
-              onClick={() => switchLog(tab.id)}
-              className={`tab px-4 py-1.5 cursor-pointer text-[12px] font-bold ${currentLog === tab.id ? 'bg-accent/10 text-accent border-b-2 border-accent' : 'text-muted hover:text-textDim'}`}
+              onClick={() => { setProjectMode(false); switchLog(tab.id); }}
+              className={`tab px-4 py-1.5 cursor-pointer text-[12px] font-bold ${!projectMode && currentLog === tab.id ? 'bg-accent/10 text-accent border-b-2 border-accent' : 'text-muted hover:text-textDim'}`}
             >
               {tab.label}
             </div>
           ))}
+          <div
+            onClick={() => setProjectMode(true)}
+            className={`tab px-4 py-1.5 cursor-pointer text-[12px] font-bold ${projectMode ? 'bg-accent/10 text-accent border-b-2 border-accent' : 'text-muted hover:text-textDim'}`}
+          >
+            {t('projectLogs')}
+          </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className={`flex items-center gap-2 ${projectMode ? 'hidden' : ''}`}>
           <button
             className="btn-ghost p-2"
             title={t('refreshLogsTooltip')}
@@ -141,7 +149,7 @@ const PageLogs = () => {
         </div>
       </div>
 
-      <div
+      {projectMode ? <ProjectLogs /> : <div
         ref={scrollRef}
         className="flex-1 overflow-y-auto overflow-x-hidden p-5 px-6 bg-[#0a0b0d] font-mono text-[12px] leading-relaxed whitespace-pre-wrap break-words"
       >
@@ -155,7 +163,7 @@ const PageLogs = () => {
             </div>
           ))
         )}
-      </div>
+      </div>}
     </div>
   );
 };

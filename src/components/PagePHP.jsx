@@ -366,6 +366,25 @@ const PagePHP = () => {
           )}
         </div>
 
+        {/* CA bundle (curl.cainfo / openssl.cafile + Node / curl variables) */}
+        <div className="bg-surface border border-border rounded-xl p-5 mb-6">
+          <div className="flex items-start gap-3">
+            <div className="flex-1">
+              <div className="text-[13px] font-bold uppercase tracking-wider">{t('caBundleTitle')}</div>
+              <div className="text-[11px] text-muted mt-1">{t('caBundleDesc')}</div>
+              <code className="text-[11px] text-textDim font-mono block mt-2">{useStore.getState().caBundlePath()}</code>
+            </div>
+            <button type="button" className="btn-primary text-[12px] flex items-center gap-1.5" onClick={() => useStore.getState().refreshCaBundle()}>
+              {t('refreshCa')}
+            </button>
+          </div>
+          <label className="flex items-start gap-2 mt-3 text-[12px] cursor-pointer">
+            <input type="checkbox" className="mt-0.5" checked={!!settings.caEnvForCurl} onChange={e => useStore.getState().setCurlCaEnv(e.target.checked)} />
+            <span>{t('caEnvForCurl')}<span className="block text-[10px] text-muted">{t('caEnvForCurlHint')}</span></span>
+          </label>
+          <div className="text-[10px] text-muted mt-2">{t('nodeCaHint')}</div>
+        </div>
+
         {/* Extensions Manager */}
         <div className="bg-surface border border-border/40 shadow-liquid rounded-[32px] p-6 mb-6">
           <div className="flex items-center justify-between mb-4">

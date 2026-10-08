@@ -1,4 +1,4 @@
-import { getPhpDir } from '../lib/paths';
+import { getPhpDir, getBinDir } from '../lib/paths';
 
 export const createPhpSlice = (set, get) => ({
     phpVersions: [
@@ -433,9 +433,43 @@ export const createPhpSlice = (set, get) => ({
         }
     },
 
+    /** php_redis.dll build matching the PHP version, thread safety and compiler (PECL Windows builds). */
+    phpRedisZipUrl: async (php) => {
+        const { invoke } = await import('@tauri-apps/api/core');
+        const [major, minor] = php.version.split('.').map(Number);
+        const dir = getPhpDir(get(), php).replace(/\//g, '\\');
+        const ts = (await invoke('path_exists', { path: `${dir}\\php${major}ts.dll` })) ? 'ts' : 'nts';
+        const compiler = major < 8 ? 'vc15' : minor >= 4 || major > 8 ? 'vs17' : 'vs16';
+        const redis = '6.3.0';
+        return `https://downloads.php.net/~windows/pecl/releases/redis/${redis}/php_redis-${redis}-${major}.${minor}-${ts}-${compiler}-x64.zip`;
+    },
+
+    installPhpRedis: async (php) => {
+        const { invoke } = await import('@tauri-apps/api/core');
+        const dir = getPhpDir(get(), php).replace(/\//g, '\\');
+        if (!(await invoke('path_exists', { path: `${dir}\\ext\\php_redis.dll` }))) {
+            const url = await get().phpRedisZipUrl(php);
+            get().showToast(get().t('phpRedisDownloading', { version: php.version }), 'info');
+            await invoke('install_php_ext_from_zip', { url, extDir: `${dir}\\ext`, dllName: 'php_redis.dll' });
+        }
+        await invoke('ensure_php_extension', { iniPath: `${dir}\\php.ini`, ext: 'redis' });
+    },
+
     addExtension: async (ext) => {
         const active = get().phpVersions.find(v => v.active && v.installed);
         if (!active) return;
+
+        if (ext === 'redis') {
+            try {
+                await get().installPhpRedis(active);
+                await get().syncExtensionsFromActivePhp();
+                get().showToast(get().t('extensionAdded', { ext }), 'ok');
+                if (get().services.find(s => s.type === 'web')?.status === 'running') await get().restartApache();
+            } catch (e) {
+                get().showToast(`${e}`, 'danger');
+            }
+            return;
+        }
 
         const devDir = get().settings.devStackDir.replace(/\\/g, '/');
         const iniPath = `${devDir}/bin/php/php-${active.version}/php.ini`.replace(/\//g, '\\');
@@ -475,6 +509,71 @@ export const createPhpSlice = (set, get) => ({
         } catch (e) {
             console.error('removeExtension failed:', e);
             get().showToast(`Failed to disable ${ext}`, 'danger');
+        }
+    },
+
+    caBundlePath: () => `${getBinDir(get())}/php/ca-bundle.pem`,
+
+    /** Points curl.cainfo / openssl.cafile of every installed PHP at the DevStack bundle. */
+    _writePhpCaBlocks: async () => {
+        const { invoke } = await import('@tauri-apps/api/core');
+        const bundle = get().caBundlePath();
+        for (const php of get().phpVersions.filter(v => v.installed)) {
+            const iniPath = `${getPhpDir(get(), php)}/php.ini`.replace(/\//g, '\\');
+            if (!(await invoke('path_exists', { path: iniPath }))) continue;
+            await invoke('write_managed_block', {
+                path: iniPath,
+                name: 'CA CONFIG',
+                comment: ';',
+                body: `curl.cainfo = "${bundle}"\r\nopenssl.cafile = "${bundle}"`,
+            });
+        }
+    },
+
+    /** On startup: create the CA bundle once and keep every php.ini pointing at it. */
+    ensurePhpCaConfig: async () => {
+        const { invoke } = await import('@tauri-apps/api/core');
+        try {
+            const bundle = get().caBundlePath().replace(/\//g, '\\');
+            if (!(await invoke('path_exists', { path: bundle }))) {
+                await invoke('build_ca_bundle', { dest: bundle });
+                await invoke('set_user_env', { name: 'NODE_EXTRA_CA_CERTS', value: bundle });
+            }
+            await get()._writePhpCaBlocks();
+        } catch (e) {
+            console.error('ensurePhpCaConfig failed:', e);
+        }
+    },
+
+    /** Rebuilds the bundle from the Windows root stores (incl. the mkcert CA). */
+    refreshCaBundle: async ({ restart = true } = {}) => {
+        const { invoke } = await import('@tauri-apps/api/core');
+        const { t, showToast, settings } = get();
+        try {
+            const bundle = get().caBundlePath().replace(/\//g, '\\');
+            const count = await invoke('build_ca_bundle', { dest: bundle });
+            await get()._writePhpCaBlocks();
+            await invoke('set_user_env', { name: 'NODE_EXTRA_CA_CERTS', value: bundle });
+            if (settings.caEnvForCurl) {
+                await invoke('set_user_env', { name: 'CURL_CA_BUNDLE', value: bundle });
+                await invoke('set_user_env', { name: 'SSL_CERT_FILE', value: bundle });
+            }
+            showToast(t('caBundleRefreshed', { count }), 'ok');
+            if (restart && get().services.find(s => s.type === 'web')?.status === 'running') await get().restartApache();
+        } catch (e) {
+            showToast(`${e}`, 'danger');
+        }
+    },
+
+    setCurlCaEnv: async (enabled) => {
+        const { invoke } = await import('@tauri-apps/api/core');
+        const value = enabled ? get().caBundlePath().replace(/\//g, '\\') : '';
+        try {
+            await invoke('set_user_env', { name: 'CURL_CA_BUNDLE', value });
+            await invoke('set_user_env', { name: 'SSL_CERT_FILE', value });
+            get().updateSettings({ caEnvForCurl: enabled });
+        } catch (e) {
+            get().showToast(`${e}`, 'danger');
         }
     },
 

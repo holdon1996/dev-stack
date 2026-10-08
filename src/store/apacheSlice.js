@@ -130,6 +130,15 @@ export const createApacheSlice = (set, get) => ({
             await invoke('ensure_apache_log_files', {
                 apacheRoot: resolvedRoot
             });
+            if (!(await get()._apacheConfigOk(resolvedRoot))) return false;
+            if (get()._managedSites().some(s => s.cfg.ssl)) {
+                const owner = await invoke('port_owner', { port: 443 });
+                if (owner && !/^httpd/i.test(owner.name)) {
+                    get().showToast(get().t('port443Busy', { name: owner.service || owner.name, pid: owner.pid }), 'danger');
+                    return false;
+                }
+            }
+            await get().ensureFcgiBackends();
             await invoke('start_detached_process', {
                 executable: `${resolvedRoot}\\bin\\httpd.exe`.replace(/\//g, '\\'),
                 args: [] // Apache usually just runs with its default httpd.conf if placed correctly
@@ -145,11 +154,30 @@ export const createApacheSlice = (set, get) => ({
         set(s => ({ apacheVersions: s.apacheVersions.map(v => ({ ...v, active: v.version === version })) }));
         const activePhp = get().phpVersions.find(p => p.active && p.installed);
         if (activePhp) await get().configureApachePhp(activePhp.version, version);
+        // Managed vhosts live in each version's httpd-vhosts.conf; write them for the new one.
+        if (get()._managedSites().length) await get().applySites({ restart: false });
         await get().restartApache();
         get().showToast(`Apache ${version} activated`, 'ok');
     },
 
+    /** Runs `httpd -t`; on failure logs the output and returns false. */
+    _apacheConfigOk: async (apacheRoot) => {
+        const { invoke } = await import('@tauri-apps/api/core');
+        try {
+            await invoke('apache_config_test', { apacheRoot });
+            return true;
+        } catch (output) {
+            get().addServiceLog('apache', `httpd -t: ${output}`, 'err');
+            get().showToast(get().t('apacheConfigTestFailed', { output: `${output}`.split('\n')[0] }), 'danger');
+            return false;
+        }
+    },
+
     restartApache: async () => {
+        const web = get().services.find(s => s.type === 'web');
+        const apacheRoot = get()._activeApacheRoot();
+        // Keep the running instance when the new config would not start.
+        if (web?.status === 'running' && apacheRoot && !(await get()._apacheConfigOk(apacheRoot))) return false;
         await get().toggleService(1, 'stop');
         await new Promise(r => setTimeout(r, 1000));
         await get().toggleService(1, 'start');

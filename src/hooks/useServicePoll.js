@@ -22,6 +22,7 @@ export function useServicePoll() {
             }
 
             await checkServices();
+            await useStore.getState().checkApacheConfigStale();
 
             // Read services AFTER the check to determine next interval
             const services = useStore.getState().services;

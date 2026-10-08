@@ -13,8 +13,16 @@ struct TunnelRecord {
 pub struct PreparedTunnel {
     tunnel_name: String,
     config_path: String,
-    public_url: String,
-    dns_route_updated: bool,
+    public_urls: Vec<String>,
+    dns_routes_updated: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TunnelRoute {
+    hostname: String,
+    port: u16,
+    host_header: String,
 }
 
 fn cloudflare_dir() -> Result<PathBuf, String> {
@@ -61,7 +69,7 @@ fn ensure_success(output: Output, action: &str) -> Result<String, String> {
     }
 }
 
-fn is_valid_domain(domain: &str) -> bool {
+pub(crate) fn is_valid_domain(domain: &str) -> bool {
     if domain.len() > 253 || !domain.contains('.') {
         return false;
     }
@@ -102,17 +110,45 @@ fn validate_tunnel_name(tunnel_name: &str) -> Result<String, String> {
     Ok(tunnel_name.to_string())
 }
 
-fn config_uses_tunnel(config_path: &Path, tunnel_id: &str) -> bool {
-    std::fs::read_to_string(config_path)
-        .ok()
-        .and_then(|config| {
-            config.lines().find_map(|line| {
-                line.trim()
-                    .strip_prefix("tunnel:")
-                    .map(|value| value.trim().to_string())
-            })
-        })
-        .is_some_and(|configured_id| configured_id == tunnel_id)
+/// Hostnames already routed by `config_path`, when it belongs to `tunnel_id`.
+fn routed_hostnames(config_path: &Path, tunnel_id: &str) -> Vec<String> {
+    let Ok(config) = std::fs::read_to_string(config_path) else { return Vec::new() };
+    let same_tunnel = config
+        .lines()
+        .find_map(|line| line.trim().strip_prefix("tunnel:").map(|v| v.trim().to_string()))
+        .is_some_and(|id| id == tunnel_id);
+    if !same_tunnel {
+        return Vec::new();
+    }
+    config
+        .lines()
+        .filter_map(|line| line.trim().strip_prefix("- hostname:").map(|h| h.trim().to_string()))
+        .collect()
+}
+
+/// Origin URL for a local port: Apache on 443 speaks TLS with an mkcert certificate,
+/// every other port is plain HTTP.
+fn origin_service(port: u16) -> String {
+    if port == 443 {
+        "https://localhost:443".into()
+    } else {
+        format!("http://localhost:{port}")
+    }
+}
+
+fn ingress_yaml(route: &TunnelRoute) -> String {
+    let mut origin = Vec::new();
+    if !route.host_header.is_empty() {
+        origin.push(format!("      httpHostHeader: {}", route.host_header));
+    }
+    if route.port == 443 {
+        origin.push("      noTLSVerify: true".into());
+        if !route.host_header.is_empty() {
+            origin.push(format!("      originServerName: {}", route.host_header));
+        }
+    }
+    let origin = if origin.is_empty() { String::new() } else { format!("\n    originRequest:\n{}", origin.join("\n")) };
+    format!("  - hostname: {}\n    service: {}{}\n", route.hostname, origin_service(route.port), origin)
 }
 
 fn list_tunnels(executable: &str) -> Result<Vec<TunnelRecord>, String> {
@@ -156,24 +192,26 @@ pub fn cloudflare_login(executable: String) -> Result<String, String> {
     Ok("Cloudflare account connected".into())
 }
 
-#[tauri::command]
+/// Writes `~/.cloudflared/devstack/<tunnel>.yml` with one ingress rule per route
+/// and points DNS for hostnames that are new to this tunnel.
+#[tauri::command(async)]
 pub fn prepare_cloudflare_tunnel(
     executable: String,
-    domain: String,
     tunnel_name: String,
-    protocol: String,
-    port: u16,
-    host_header: String,
+    routes: Vec<TunnelRoute>,
 ) -> Result<PreparedTunnel, String> {
-    let domain = domain.trim().trim_end_matches('.').to_ascii_lowercase();
     let tunnel_name = validate_tunnel_name(&tunnel_name)?;
-    if !is_valid_domain(&domain) {
-        return Err("Enter a valid custom domain, for example app.example.com".into());
+    if routes.is_empty() {
+        return Err("Add at least one hostname to the tunnel".into());
     }
-    if !matches!(protocol.as_str(), "http" | "https") {
-        return Err("Custom domains support HTTP or HTTPS origins only".into());
+    let mut routes = routes;
+    for route in &mut routes {
+        route.hostname = route.hostname.trim().trim_end_matches('.').to_ascii_lowercase();
+        if !is_valid_domain(&route.hostname) {
+            return Err(format!("Enter a valid custom domain instead of '{}', for example app.example.com", route.hostname));
+        }
+        validate_host_header(&route.host_header)?;
     }
-    validate_host_header(&host_header)?;
 
     let base_dir = cloudflare_dir()?;
     if !base_dir.join("cert.pem").is_file() {
@@ -191,40 +229,126 @@ pub fn prepare_cloudflare_tunnel(
 
     let config_dir = base_dir.join("devstack");
     std::fs::create_dir_all(&config_dir).map_err(|error| error.to_string())?;
-    let config_path = config_dir.join(format!("{}.yml", domain.replace('.', "-")));
-    let dns_route_updated = !config_uses_tunnel(&config_path, &tunnel.id);
-    if dns_route_updated {
+    let config_path = config_dir.join(format!("{tunnel_name}.yml"));
+    let already_routed = routed_hostnames(&config_path, &tunnel.id);
+
+    let mut dns_routes_updated = Vec::new();
+    for route in routes.iter().filter(|r| !already_routed.contains(&r.hostname)) {
         let output = run_cloudflared(
             &executable,
-            &[
-                "tunnel",
-                "route",
-                "dns",
-                "--overwrite-dns",
-                &tunnel.id,
-                &domain,
-            ],
+            &["tunnel", "route", "dns", "--overwrite-dns", &tunnel.id, &route.hostname],
         )?;
         ensure_success(output, "create the DNS route")?;
+        dns_routes_updated.push(route.hostname.clone());
     }
 
-    let host_header_yaml = if host_header.is_empty() {
-        String::new()
-    } else {
-        format!("\n    originRequest:\n      httpHostHeader: {host_header}")
-    };
     let credentials_yaml = credentials_path.to_string_lossy().replace('\\', "/");
+    let ingress: String = routes.iter().map(ingress_yaml).collect();
     let config = format!(
-        "tunnel: {}\ncredentials-file: {}\n\ningress:\n  - hostname: {}\n    service: {}://localhost:{}{}\n  - service: http_status:404\n",
-        tunnel.id, credentials_yaml, domain, protocol, port, host_header_yaml
+        "tunnel: {}\ncredentials-file: {}\n\ningress:\n{}  - service: http_status:404\n",
+        tunnel.id, credentials_yaml, ingress
     );
     std::fs::write(&config_path, config).map_err(|error| error.to_string())?;
 
     Ok(PreparedTunnel {
         tunnel_name,
         config_path: path_string(&config_path),
-        public_url: format!("https://{domain}"),
-        dns_route_updated,
+        public_urls: routes.iter().map(|r| format!("https://{}", r.hostname)).collect(),
+        dns_routes_updated,
+    })
+}
+
+/// Config for quick tunnels. Passing it stops cloudflared from loading
+/// `~/.cloudflared/config.yml`, whose catch-all `http_status:404` ingress would
+/// otherwise answer every trycloudflare.com request.
+#[tauri::command]
+pub fn cloudflare_quick_config() -> Result<String, String> {
+    let dir = cloudflare_dir()?.join("devstack");
+    std::fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
+    let path = dir.join("quick-tunnel.yml");
+    // An empty file makes cloudflared log an error, so it carries one harmless key.
+    std::fs::write(&path, "# DevStack quick tunnel: keeps ~/.cloudflared/config.yml from being loaded.\nno-autoupdate: true\n")
+        .map_err(|error| error.to_string())?;
+    Ok(path_string(&path))
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KnownRoute {
+    hostname: String,
+    host_header: String,
+    port: u16,
+    tunnel_name: String,
+}
+
+fn parse_routes(config: &str, tunnel_name: &str) -> Vec<KnownRoute> {
+    let mut routes: Vec<KnownRoute> = Vec::new();
+    for line in config.lines().map(str::trim) {
+        if let Some(hostname) = line.strip_prefix("- hostname:") {
+            routes.push(KnownRoute { hostname: hostname.trim().to_string(), host_header: String::new(), port: 80, tunnel_name: tunnel_name.to_string() });
+        } else if let (Some(service), Some(route)) = (line.strip_prefix("service:"), routes.last_mut()) {
+            if let Some(port) = service.trim().rsplit(':').next().and_then(|p| p.trim_end_matches('/').parse().ok()) {
+                route.port = port;
+            }
+        } else if let (Some(header), Some(route)) = (line.strip_prefix("httpHostHeader:"), routes.last_mut()) {
+            route.host_header = header.trim().to_string();
+        }
+    }
+    routes
+}
+
+/// Hostname routes found in DevStack tunnel configs, including the per-hostname
+/// files older builds wrote, so hostname ownership survives an upgrade.
+#[tauri::command]
+pub fn cloudflare_known_routes() -> Vec<KnownRoute> {
+    let Ok(dir) = cloudflare_dir().map(|d| d.join("devstack")) else { return Vec::new() };
+    let Ok(entries) = std::fs::read_dir(dir) else { return Vec::new() };
+    entries
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.extension().is_some_and(|x| x == "yml") && p.file_stem().is_some_and(|s| s != "quick-tunnel"))
+        .flat_map(|p| {
+            let name = p.file_stem().unwrap_or_default().to_string_lossy().to_string();
+            parse_routes(&std::fs::read_to_string(&p).unwrap_or_default(), &name)
+        })
+        .collect()
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProbeResult {
+    status: u16,
+    server: String,
+    cf_mitigated: String,
+}
+
+/// Requests a public URL without running JavaScript, the way a webhook sender would,
+/// so Cloudflare challenges (which browsers pass silently) become visible.
+#[tauri::command]
+pub async fn probe_public_url(url: String) -> Result<ProbeResult, String> {
+    let client = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .timeout(std::time::Duration::from_secs(15))
+        .build()
+        .map_err(|e| e.to_string())?;
+    let response = client
+        .get(&url)
+        .header("User-Agent", "DevStack-webhook-probe")
+        .send()
+        .await
+        .map_err(|e| format!("Could not reach {url}: {e}"))?;
+    let header = |name: &str| {
+        response
+            .headers()
+            .get(name)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or_default()
+            .to_string()
+    };
+    Ok(ProbeResult {
+        status: response.status().as_u16(),
+        server: header("server"),
+        cf_mitigated: header("cf-mitigated"),
     })
 }
 
@@ -234,7 +358,7 @@ fn path_string(path: &Path) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{config_uses_tunnel, is_valid_domain, validate_tunnel_name};
+    use super::{ingress_yaml, is_valid_domain, parse_routes, routed_hostnames, validate_tunnel_name, TunnelRoute};
     use std::fs;
 
     #[test]
@@ -254,15 +378,34 @@ mod tests {
     }
 
     #[test]
-    fn detects_when_config_points_to_another_tunnel() {
+    fn reads_hostnames_only_for_the_same_tunnel() {
         let path = std::env::temp_dir().join("devstack-cloudflare-config-test.yml");
         fs::write(
             &path,
-            "tunnel: old-id\ningress:\n  - service: http_status:404\n",
+            "tunnel: old-id\ningress:\n  - hostname: a.example.com\n    service: http://localhost:80\n  - service: http_status:404\n",
         )
         .unwrap();
-        assert!(config_uses_tunnel(&path, "old-id"));
-        assert!(!config_uses_tunnel(&path, "new-id"));
+        assert_eq!(routed_hostnames(&path, "old-id"), vec!["a.example.com".to_string()]);
+        assert!(routed_hostnames(&path, "new-id").is_empty());
         fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn parses_routes_from_tunnel_config() {
+        let config = "tunnel: x\ningress:\n  - hostname: api.thach.website\n    service: http://localhost:80\n    originRequest:\n      httpHostHeader: ugcm-be.test\n  - service: http_status:404\n";
+        let routes = parse_routes(config, "api-thach-website");
+        assert_eq!(routes.len(), 1);
+        assert_eq!((routes[0].hostname.as_str(), routes[0].host_header.as_str(), routes[0].port), ("api.thach.website", "ugcm-be.test", 80));
+    }
+
+    #[test]
+    fn origin_scheme_follows_port() {
+        let http = ingress_yaml(&TunnelRoute { hostname: "a.example.com".into(), port: 80, host_header: "a.test".into() });
+        assert!(http.contains("service: http://localhost:80"));
+        assert!(!http.contains("noTLSVerify"));
+
+        let https = ingress_yaml(&TunnelRoute { hostname: "a.example.com".into(), port: 443, host_header: "a.test".into() });
+        assert!(https.contains("service: https://localhost:443"));
+        assert!(https.contains("noTLSVerify: true") && https.contains("originServerName: a.test"));
     }
 }

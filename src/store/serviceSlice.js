@@ -10,12 +10,13 @@ export const createServiceSlice = (set, get) => ({
     services: [
         { id: 1, name: 'Apache (DevStack)', type: 'web', version: '—', port: 80, status: 'stopped', pid: null, memory: '—' },
         { id: 2, name: 'MySQL (DevStack)', type: 'db', version: '—', port: 3306, status: 'stopped', pid: null, memory: '—' },
-        { id: 3, name: 'PHP (DevStack)', type: 'php', version: '—', port: 9000, status: 'stopped', pid: null, memory: '—' },
+        { id: 3, name: 'PHP (DevStack)', type: 'php', version: '—', port: 0, status: 'stopped', pid: null, memory: '—' },
         { id: 4, name: 'Redis (DevStack)', type: 'cache', version: '-', port: 6379, status: 'stopped', pid: null, memory: '—' },
         { id: 5, name: 'Mailpit (DevStack)', type: 'mail', version: '—', port: 1025, status: 'stopped', pid: null, memory: '—' },
+        { id: 6, name: 'MinIO (DevStack)', type: 'storage', version: '—', port: 9000, status: 'stopped', pid: null, memory: '—' },
     ],
 
-    logs: { apache: [], mysql: [], php: [], redis: [], mail: [] },
+    logs: { apache: [], mysql: [], php: [], redis: [], mail: [], storage: [] },
     currentLog: 'apache',
     portConflicts: {},
     _lastServiceCheck: 0,
@@ -184,10 +185,59 @@ export const createServiceSlice = (set, get) => ({
                     })
                 };
             });
+            await get()._refreshPortOwners();
         } catch (e) {
             console.error('checkServicesRunning failed:', e);
         }
     },
+
+    _isDevstackExe: (exe) => {
+        const devDir = (get().settings.devStackDir || '').replace(/\//g, '\\').toLowerCase();
+        return !!devDir && (exe || '').toLowerCase().startsWith(devDir);
+    },
+
+    /** Name, PID, exe and Windows service of the program holding a stopped service's port. */
+    _refreshPortOwners: async () => {
+        const { invoke } = await import('@tauri-apps/api/core');
+        const owners = {};
+        for (const svc of get().services) {
+            if (svc.portConflict && svc.status !== 'running' && parseInt(svc.port)) {
+                owners[svc.id] = await invoke('port_owner', { port: parseInt(svc.port) }).catch(() => null);
+            }
+        }
+        set(s => ({ services: s.services.map(svc => ({ ...svc, portOwner: owners[svc.id] || null })) }));
+    },
+
+    /** The non-DevStack process listening on one of the service's ports, if any. */
+    _externalPortOwner: async (svc) => {
+        const { invoke } = await import('@tauri-apps/api/core');
+        const ports = [parseInt(svc.port)];
+        if (svc.type === 'mail') ports.push(parseInt(get().settings.mailUiPort || 8025));
+        if (svc.type === 'storage') ports.push(parseInt(svc.port) + 1);
+        for (const port of ports.filter(Boolean)) {
+            const owner = await invoke('port_owner', { port }).catch(() => null);
+            if (owner && !get()._isDevstackExe(owner.exe)) return { ...owner, port };
+        }
+        return null;
+    },
+
+    stopWindowsService: async (svc) => {
+        const name = svc.portOwner?.service;
+        if (!name) return;
+        const { invoke } = await import('@tauri-apps/api/core');
+        try {
+            await invoke('stop_windows_service', { name });
+            get().showToast(get().t('windowsServiceStopped', { name }), 'ok');
+        } catch (e) {
+            get().showToast(`${e}`, 'danger');
+        }
+        await new Promise(r => setTimeout(r, 1000));
+        await get().checkServicesRunning();
+    },
+
+    useExternalService: (id) => set(s => ({
+        services: s.services.map(svc => svc.id === id ? { ...svc, useExternal: true } : svc),
+    })),
 
     killPort: async (port) => {
         try {
@@ -249,6 +299,11 @@ export const createServiceSlice = (set, get) => ({
             return;
         }
 
+        if (action === 'restart' && svc.type === 'web') {
+            await get().restartApache();
+            return;
+        }
+
         if (action === 'restart') {
             const isRunning = svc.status === 'running' || svc.pid;
             get().showToast(get().t('restarting', { name: svc.name }) || `Restarting ${svc.name}...`, 'info');
@@ -264,13 +319,13 @@ export const createServiceSlice = (set, get) => ({
         if (svc.type === 'web') activeVer = get().apacheVersions.find(v => v.active && v.installed)?.version || activeVer || '...';
         if (svc.type === 'db') activeVer = get().mysqlVersions.find(v => v.active && v.installed)?.version || activeVer || '...';
         if (svc.type === 'php') activeVer = get().phpVersions.find(v => v.active && v.installed)?.version || activeVer || '...';
-        if (svc.type === 'cache') activeVer = 'Latest';
+        if (svc.type === 'cache' || svc.type === 'storage') activeVer = 'Latest';
         if (svc.type === 'mail') activeVer = get().settings.mailpitVersion || activeVer || 'Mailpit';
         const svcLabel = `${svc.name.replace(' (DevStack)', '')} v${activeVer} (Port: ${svc.port})`;
 
         const isRunning = svc.status === 'running' || svc.pid;
         const shouldStop = action ? action === 'stop' : isRunning;
-        const logType = svc.type === 'web' ? 'apache' : svc.type === 'db' ? 'mysql' : svc.type === 'cache' ? 'redis' : svc.type === 'mail' ? 'mail' : 'php';
+        const logType = svc.type === 'web' ? 'apache' : svc.type === 'db' ? 'mysql' : svc.type === 'cache' ? 'redis' : svc.type === 'mail' ? 'mail' : svc.type === 'storage' ? 'storage' : 'php';
 
         console.log(`[Timer] Toggle clicked for ${svc.name} - Action: ${shouldStop ? 'STOP' : 'START'}`);
 
@@ -279,10 +334,11 @@ export const createServiceSlice = (set, get) => ({
             get().addServiceLog(logType, `Stopping ${svcLabel} ...`, 'warn');
             set(s => ({ services: s.services.map(sv => sv.id === id ? { ...sv, status: 'stopping' } : sv) }));
 
-            const name = svc.type === 'web' ? 'httpd.exe' : svc.type === 'db' ? 'mysqld.exe' : svc.type === 'cache' ? 'redis-server.exe' : svc.type === 'mail' ? 'mailpit.exe' : 'php-cgi.exe';
+            const name = svc.type === 'web' ? 'httpd.exe' : svc.type === 'db' ? 'mysqld.exe' : svc.type === 'cache' ? 'redis-server.exe' : svc.type === 'mail' ? 'mailpit.exe' : svc.type === 'storage' ? 'minio.exe' : 'php-cgi.exe';
             const { invoke } = await import('@tauri-apps/api/core');
 
             const t1 = performance.now();
+            if (svc.type === 'storage') await invoke('proc_stop', { id: 'minio' });
             await invoke('kill_process_by_name_exact', { name });
             if (svc.type === 'php') await invoke('kill_process_by_name_exact', { name: 'php.exe' });
             console.log(`[Timer] Native Rust kill done in ${(performance.now() - t1).toFixed(2)}ms`);
@@ -298,6 +354,19 @@ export const createServiceSlice = (set, get) => ({
                 get().addServiceLog(logType, `${svcLabel} stopped (force).`, 'warn');
             }
         } else {
+            const owner = await get()._externalPortOwner(svc);
+            if (owner) {
+                const message = get().t('portOwnedBy', {
+                    port: owner.port,
+                    name: owner.service ? get().t('windowsServiceLabel', { name: owner.service }) : owner.name,
+                    pid: owner.pid,
+                    exe: owner.exe || '?',
+                });
+                get().showToast(message, 'danger');
+                get().addServiceLog(logType, message, 'err');
+                set(s => ({ services: s.services.map(sv => sv.id === id ? { ...sv, portConflict: true, portOwner: owner } : sv) }));
+                return;
+            }
             get().showToast(`Starting ${svcLabel}...`, 'info');
             get().addServiceLog(logType, `Starting ${svcLabel}...`, 'info');
             set(s => ({ services: s.services.map(sv => sv.id === id ? { ...sv, status: 'starting' } : sv) }));
@@ -310,6 +379,7 @@ export const createServiceSlice = (set, get) => ({
             if (svc.type === 'php') started = await get().startPhp();
             if (svc.type === 'cache') started = await get().startRedis();
             if (svc.type === 'mail') started = await get().startMailpit();
+            if (svc.type === 'storage') started = await get().startMinio();
 
             console.log(`[Timer] Native Rust spawn done in ${(performance.now() - t1).toFixed(2)}ms`);
 
@@ -469,7 +539,13 @@ export const createServiceSlice = (set, get) => ({
         await get().scanInstalledMysql();
         await get().scanInstalledNode?.();
         await get().scanSites();
+        await get().initProcesses();
+        await get().ensurePhpCaConfig();
+        get().loadHostsFile();
 
+        if (get().settings.autoStartMap?.[5] === undefined) {
+            get().updateSettings({ autoStartMap: { ...(get().settings.autoStartMap || {}), 5: true } });
+        }
         const autoMap = get().settings.autoStartMap || {};
         get().services.forEach(svc => {
             if (svc.type !== 'php' && autoMap[svc.id] === true && svc.status !== 'running') {
@@ -485,14 +561,15 @@ export const createServiceSlice = (set, get) => ({
     killAllChildProcesses: async () => {
         try {
             const { invoke } = await import('@tauri-apps/api/core');
-            const processes = ['httpd.exe', 'mysqld.exe', 'redis-server.exe', 'php-cgi.exe', 'php.exe', 'mailpit.exe'];
+            await invoke('proc_stop_all');
+            const processes = ['httpd.exe', 'mysqld.exe', 'redis-server.exe', 'php-cgi.exe', 'php.exe', 'mailpit.exe', 'minio.exe'];
             await Promise.all(processes.map(name => invoke('kill_process_by_name_exact', { name })));
         } catch (e) {
             console.error('Failed to kill processes natively', e);
         }
     },
 
-    openTerminal: async (prjPath) => {
+    openTerminal: async (prjPath, shell = 'cmd') => {
         if (prjPath) {
             await get().detectAndSwitchPhpForProject(prjPath);
         }
@@ -500,25 +577,19 @@ export const createServiceSlice = (set, get) => ({
         const s = get().settings;
         const devDir = (s.devStackDir || 'C:/devstack');
         const targetPath = (prjPath || s.rootPath || devDir).replace(/\//g, '\\');
+        const site = prjPath && get().sites.find(x => x.path.replace(/\\/g, '/') === prjPath.replace(/\\/g, '/'));
+        const cfg = site ? get().siteConfigs[site.key] : null;
         const { invoke } = await import('@tauri-apps/api/core');
-        const activePhp = get().phpVersions?.find(v => v.active && v.installed);
-        const activeNode = get().nodeVersions?.find(v => v.active);
-        const phpPathPrefix = activePhp
-            ? `${getPhpDir(get(), activePhp).replace(/\//g, '\\')};`
-            : '';
-        const nodePathPrefix = activeNode
-            ? `${devDir.replace(/\//g, '\\')}\\bin\\node\\current;`
-            : '';
-        const envPathPrefix = phpPathPrefix || nodePathPrefix
-            ? `set "PATH=${phpPathPrefix}${nodePathPrefix}%PATH%" && `
-            : '';
-
-        // We use cmd.exe as a wrapper to set the title and current directory easily
-        // but start it detached.
-        await invoke('start_detached_process', {
-            executable: 'cmd.exe',
-            args: ['/C', 'start', '""', 'cmd.exe', '/K', `title DevStack Terminal && ${envPathPrefix}cd /d "${targetPath}"`]
-        });
+        try {
+            await invoke('open_devstack_terminal', {
+                shell,
+                cwd: targetPath,
+                pathPrefix: get().devstackPathPrefix(cfg?.phpVersion),
+                env: site ? get().siteEnv(site) : get().devstackCaEnv(),
+            });
+        } catch (e) {
+            get().showToast(`${e}`, 'danger');
+        }
     },
 
     checkPortConflict: async (port) => {

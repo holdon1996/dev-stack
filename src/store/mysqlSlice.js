@@ -1,4 +1,4 @@
-import { getMysqlDir } from '../lib/paths';
+import { getMysqlDir, getDevDir, getPhpDir } from '../lib/paths';
 
 export const createMysqlSlice = (set, get) => ({
     mysqlVersions: [
@@ -177,6 +177,175 @@ export const createMysqlSlice = (set, get) => ({
             executable: 'cmd.exe',
             args: ['/C', 'start', 'cmd.exe', '/K', `cd /d "${path}\\bin" && title MySQL Terminal (v${v}) && mysql.exe -u root -P ${port}`]
         });
+    },
+
+    dbList: [],
+    dbImportQueue: [],
+
+    _mysqlTools: () => {
+        const active = get().mysqlVersions.find(v => v.active && v.installed);
+        if (!active) throw get().t('noActiveMysql');
+        const bin = `${getMysqlDir(get(), active.version)}/bin`.replace(/\//g, '\\');
+        return { mysql: `${bin}\\mysql.exe`, mysqldump: `${bin}\\mysqldump.exe`, port: parseInt(get().settings.portMySQL || 3306, 10) };
+    },
+
+    _sql: async (sql) => {
+        const { invoke } = await import('@tauri-apps/api/core');
+        const { mysql, port } = get()._mysqlTools();
+        return invoke('mysql_exec', { mysqlExe: mysql, port, sql });
+    },
+
+    loadDatabases: async () => {
+        try {
+            const out = await get()._sql(
+                "SELECT s.schema_name, COUNT(t.table_name), ROUND(COALESCE(SUM(t.data_length + t.index_length), 0) / 1024 / 1024, 2) " +
+                "FROM information_schema.schemata s LEFT JOIN information_schema.tables t ON t.table_schema = s.schema_name " +
+                "WHERE s.schema_name NOT IN ('information_schema', 'mysql', 'performance_schema', 'sys') " +
+                "GROUP BY s.schema_name ORDER BY s.schema_name;"
+            );
+            set({ dbList: out.split(/\r?\n/).filter(Boolean).map(line => {
+                const [name, tables, size] = line.split('\t');
+                return { name, tables: parseInt(tables, 10) || 0, size: `${size} MB` };
+            }) });
+        } catch (e) {
+            set({ dbList: [] });
+            get().showToast(`${e}`.split('\n')[0], 'warn');
+        }
+    },
+
+    _validDbName: (name) => /^[A-Za-z0-9_$-]{1,64}$/.test(name),
+
+    createDatabase: async (name) => {
+        if (!get()._validDbName(name)) return get().showToast(get().t('dbNameInvalid'), 'warn');
+        try {
+            await get()._sql(`CREATE DATABASE \`${name}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;`);
+            get().showToast(get().t('dbCreated', { name }), 'ok');
+            await get().loadDatabases();
+        } catch (e) {
+            get().showToast(`${e}`, 'danger');
+        }
+    },
+
+    /** mysqldump of the given databases into <devstack>/backups. Returns the file path. */
+    backupDatabases: async (names) => {
+        const { invoke } = await import('@tauri-apps/api/core');
+        const { mysqldump, port } = get()._mysqlTools();
+        const stamp = new Date().toISOString().replace(/[-:]/g, '').replace('T', '-').slice(0, 15);
+        const dest = `${getDevDir(get())}/backups/${names.join('+')}-${stamp}.sql`.replace(/\//g, '\\');
+        return invoke('mysql_dump', { mysqldumpExe: mysqldump, port, databases: names, dest });
+    },
+
+    exportDatabases: async (names) => {
+        try {
+            const dest = await get().backupDatabases(names);
+            get().showToast(get().t('dbExported', { path: dest }), 'ok');
+        } catch (e) {
+            get().showToast(`${e}`, 'danger');
+        }
+    },
+
+    /** Drops with FOREIGN_KEY_CHECKS=0 (cross-schema FKs), after an optional backup. */
+    dropDatabase: async (name, { backup = true } = {}) => {
+        if (!get()._validDbName(name)) return false;
+        try {
+            if (backup) {
+                const dest = await get().backupDatabases([name]);
+                get().addServiceLog('mysql', get().t('dbBackedUp', { path: dest }), 'info');
+            }
+            await get()._sql(`SET FOREIGN_KEY_CHECKS=0; DROP DATABASE IF EXISTS \`${name}\`;`);
+            get().showToast(get().t('dbDropped', { name }), 'warn');
+            await get().loadDatabases();
+            return true;
+        } catch (e) {
+            get().showToast(`${e}`, 'danger');
+            return false;
+        }
+    },
+
+    setDbImportQueue: (queue) => set({ dbImportQueue: queue }),
+
+    /** Imports each `{ file, db }` in order, optionally recreating the DB first. */
+    importDumps: async ({ recreate, disableFk, backup }) => {
+        const { invoke } = await import('@tauri-apps/api/core');
+        const { listen } = await import('@tauri-apps/api/event');
+        const { mysql, port } = get()._mysqlTools();
+        await get().loadDatabases(); // fresh list decides which DBs need a backup before recreate
+        const update = (i, patch) => set(s => ({ dbImportQueue: s.dbImportQueue.map((item, j) => j === i ? { ...item, ...patch } : item) }));
+        const unlisten = await listen('db-import-progress', ({ payload }) => {
+            const i = get().dbImportQueue.findIndex(item => item.file === payload.file && item.status === 'running');
+            if (i >= 0) update(i, { pct: payload.pct });
+        });
+        let failed = 0;
+        try {
+            for (let i = 0; i < get().dbImportQueue.length; i++) {
+                const { file, db } = get().dbImportQueue[i];
+                if (!get()._validDbName(db)) {
+                    update(i, { status: 'error', error: get().t('dbNameInvalid') });
+                    failed++;
+                    continue;
+                }
+                update(i, { status: 'running', pct: 0, error: '' });
+                try {
+                    if (recreate) {
+                        if (backup && get().dbList.some(d => d.name === db && d.tables > 0)) await get().backupDatabases([db]);
+                        await get()._sql(`SET FOREIGN_KEY_CHECKS=0; DROP DATABASE IF EXISTS \`${db}\`; CREATE DATABASE \`${db}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;`);
+                    } else {
+                        await get()._sql(`CREATE DATABASE IF NOT EXISTS \`${db}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;`);
+                    }
+                    await invoke('mysql_import', { mysqlExe: mysql, port, database: db, file, disableFk });
+                    update(i, { status: 'done', pct: 100 });
+                } catch (e) {
+                    update(i, { status: 'error', error: `${e}` });
+                    failed++;
+                }
+            }
+        } finally {
+            unlisten();
+        }
+        await get().loadDatabases();
+        get().showToast(failed ? get().t('dbImportFailed', { count: failed }) : get().t('dbImportDone'), failed ? 'danger' : 'ok');
+    },
+
+    /** Opens Adminer (served by php -S, auto-login as root) or TablePlus. */
+    openAdminTool: async (tool) => {
+        const { invoke } = await import('@tauri-apps/api/core');
+        const { openUrl } = await import('@tauri-apps/plugin-opener');
+        const { t, showToast } = get();
+        const { port } = get()._mysqlTools();
+        if (tool === 'tableplus') {
+            const candidates = ['C:\\Program Files\\TablePlus\\TablePlus.exe', 'C:\\Program Files (x86)\\TablePlus\\TablePlus.exe'];
+            for (const exe of candidates) {
+                if (await invoke('path_exists', { path: exe })) {
+                    await invoke('start_detached_process', { executable: exe, args: [] });
+                    showToast(t('tablePlusOpened', { url: `mysql://root@127.0.0.1:${port}` }), 'info');
+                    return;
+                }
+            }
+            showToast(t('tablePlusNotFound'), 'warn');
+            return;
+        }
+
+        const dir = `${getDevDir(get())}/bin/tools/adminer`.replace(/\//g, '\\');
+        const php = get().phpVersions.find(v => v.active && v.installed);
+        if (!php) return showToast(t('noActivePhp'), 'warn');
+        try {
+            if (!(await invoke('path_exists', { path: `${dir}\\adminer.php` }))) {
+                await invoke('create_dir', { path: dir });
+                await invoke('download_file', { url: 'https://github.com/vrana/adminer/releases/download/v4.8.1/adminer-4.8.1-mysql.php', destPath: `${dir}\\adminer.php` });
+            }
+            await invoke('write_text_file', {
+                path: `${dir}\\index.php`,
+                content: `<?php\n// DevStack: log in to the local MySQL as root without a password.\nfunction adminer_object() {\n    class DevStackAdminer extends Adminer {\n        function credentials() { return array('127.0.0.1:${port}', 'root', ''); }\n        function login($login, $password) { return true; }\n    }\n    return new DevStackAdminer;\n}\ninclude __DIR__ . '/adminer.php';\n`,
+            });
+            if (!get().procs.adminer?.running) {
+                const phpDir = getPhpDir(get(), php).replace(/\//g, '\\');
+                await get().startProcess({ id: 'adminer', command: `"${phpDir}\\php.exe" -S 127.0.0.1:8090 -t "${dir}"`, cwd: dir, pathPrefix: phpDir });
+                await new Promise(r => setTimeout(r, 800));
+            }
+            await openUrl(`http://127.0.0.1:8090/?server=127.0.0.1:${port}&username=root`);
+        } catch (e) {
+            showToast(`${e}`, 'danger');
+        }
     },
 
     repairMysqlFromLaragon: async (version) => {

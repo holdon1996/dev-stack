@@ -271,12 +271,16 @@ export const createConfigSlice = (set, get) => ({
     removeSite: async (id, siteDomain, sitePath) => {
         try {
             const { invoke } = await import('@tauri-apps/api/core');
-            const { settings, apacheVersions } = get();
+            const { settings, apacheVersions, sites } = get();
+            const site = sites.find(s => s.id === id);
             const activeApache = apacheVersions.find(v => v.active)?.version;
 
-            if (activeApache && siteDomain) {
+            if (site) await get().forgetSite(site.key);
+
+            if (activeApache && site?.legacyDomain) {
+                // Hand-written vhost from before DevStack managed this project, if any.
                 const vhostsFile = `${settings.devStackDir}/bin/apache/apache-${activeApache}/conf/extra/httpd-vhosts.conf`.replace(/\\/g, '\\\\');
-                await invoke('remove_virtual_host', { domain: siteDomain, vhostsFile });
+                await invoke('remove_virtual_host', { domain: site.legacyDomain, vhostsFile });
                 // Auto restart apache to clear config
                 get().restartApache();
             }
@@ -301,6 +305,7 @@ export const createConfigSlice = (set, get) => ({
         try {
             const { invoke } = await import('@tauri-apps/api/core');
             const { detectFramework, suggestPhpVersion } = await import('../lib/project');
+            const { legacyDomain } = await import('../lib/sites');
 
             const rootPath = get().settings.rootPath;
             if (!rootPath) return;
@@ -309,21 +314,24 @@ export const createConfigSlice = (set, get) => ({
             const folders = await invoke('list_subdirs', { path: rootPath });
 
             if (folders && folders.length > 0) {
-                const existingSites = get().sites; // preserve ssl state
+                const { siteConfigs } = get();
                 const sites = await Promise.all(folders.filter(f => !f.startsWith('.')).map(async (name, i) => {
                     const sitePath = rootPath.replace(/\\/g, '/') + '/' + name;
                     const framework = await detectFramework(sitePath);
                     const suggestedPhp = suggestPhpVersion(framework);
-                    const domain = name.toLowerCase().replace(/[^a-z0-9-]/g, '') + '.test';
-                    const existing = existingSites.find(s => s.domain === domain);
+                    const legacy = legacyDomain(name);
+                    const cfg = siteConfigs[name];
 
                     return {
                         id: i + 1,
-                        domain,
+                        key: name,
+                        domain: cfg?.managed ? cfg.domain : legacy,
+                        legacyDomain: legacy,
                         path: sitePath,
                         php: suggestedPhp,
                         framework: framework,
-                        ssl: existing?.ssl ?? false, // preserve ssl toggle state
+                        ssl: !!(cfg?.managed && cfg.ssl),
+                        managed: !!cfg?.managed,
                     };
                 }));
                 set({ sites });
@@ -363,66 +371,6 @@ export const createConfigSlice = (set, get) => ({
             console.error('createProject error:', e);
             get().showToast(typeof e === 'string' ? e : 'Failed to create project', 'danger');
             return false;
-        }
-    },
-
-    setupVirtualHost: async (site) => {
-        const { domain, path: docRoot } = site;
-        const { settings, apacheVersions, showToast, scanSites } = get();
-        const activeApache = apacheVersions.find(v => v.active && v.installed);
-
-        if (!activeApache) {
-            showToast('No active Apache version found', 'warn');
-            return;
-        }
-
-        const devDir = settings.devStackDir.replace(/\\/g, '/').replace(/\/+$/, '');
-        const apacheBase = `${devDir}/bin/apache/apache-${activeApache.version}`;
-        const httpdConf = `${apacheBase}/conf/httpd.conf`.replace(/\//g, '\\');
-        const vhostsFile = `${apacheBase}/conf/extra/httpd-vhosts.conf`.replace(/\//g, '\\');
-        const port = settings.port80 || 80;
-
-        try {
-            const { checkMkcert, generateCert } = await import('../lib/ssl');
-            const { invoke } = await import('@tauri-apps/api/core');
-
-            showToast('Updating Virtual Host (Admin rights may be requested)...', 'info');
-
-            let sslConfig = { cert: '', key: '', enabled: false };
-            if (site.ssl) {
-                const hasMkcert = await checkMkcert(settings);
-                if (hasMkcert) {
-                    const certs = await generateCert(settings, domain);
-                    sslConfig = { ...certs, enabled: true };
-                } else {
-                    showToast(
-                        `⚠️ mkcert not found at ${devDir}/bin/tools/mkcert.exe — SSL skipped. Download from https://github.com/FiloSottile/mkcert/releases`,
-                        'danger'
-                    );
-                    return; // stop here so user knows they need mkcert
-                }
-            }
-
-            const result = await invoke('setup_virtual_host', {
-                domain,
-                docRoot,
-                httpdConf,
-                vhostsFile,
-                port: parseInt(port),
-                sslEnabled: sslConfig.enabled,
-                sslCert: sslConfig.cert || "",
-                sslKey: sslConfig.key || ""
-            });
-
-            if (result === "SUCCESS") {
-                showToast(`✓ Site ${domain} configured ${site.ssl ? '(HTTPS)' : '(HTTP)'}. Restarting Apache...`, 'ok');
-                // Auto-restart Apache so the new vhost/SSL config takes effect immediately
-                await get().restartApache();
-            }
-            scanSites();
-        } catch (e) {
-            console.error('setupVirtualHost error:', e);
-            showToast(typeof e === 'string' ? e : 'Failed to setup Virtual Host', 'danger');
         }
     },
 
@@ -489,78 +437,6 @@ export const createConfigSlice = (set, get) => ({
     updateSettings: (newSettings) => set(s => ({
         settings: { ...s.settings, ...newSettings }
     })),
-
-    toggleSiteSSL: async (id) => {
-        const site = get().sites.find(s => s.id === id);
-        if (!site) return;
-
-        const newSslState = !site.ssl;
-
-        // Toggle state in UI immediately for responsive feel
-        set(s => ({ sites: s.sites.map(s2 => s2.id === id ? { ...s2, ssl: newSslState } : s2) }));
-
-        const { settings, apacheVersions, showToast } = get();
-        const activeApache = apacheVersions.find(v => v.active && v.installed);
-        if (!activeApache) {
-            showToast('Không tìm thấy Apache đang active', 'warn');
-            return;
-        }
-
-        const devDir = settings.devStackDir.replace(/\\/g, '/').replace(/\/+$/, '');
-        const apacheBase = `${devDir}/bin/apache/apache-${activeApache.version}`;
-        const httpdConf = `${apacheBase}/conf/httpd.conf`.replace(/\//g, '\\');
-        const vhostsFile = `${apacheBase}/conf/extra/httpd-vhosts.conf`.replace(/\//g, '\\');
-
-        try {
-            const { checkMkcert, installMkcert, generateCert } = await import('../lib/ssl');
-            const { invoke } = await import('@tauri-apps/api/core');
-
-            let sslConfig = { cert: '', key: '', enabled: false };
-
-            if (newSslState) {
-                // Auto-install mkcert if missing
-                const hasMkcert = await checkMkcert(settings);
-                if (!hasMkcert) {
-                    showToast('🔐 Đang tải mkcert...', 'info');
-                    try {
-                        await installMkcert(settings);
-                        showToast('✓ mkcert đã được cài tự động', 'ok');
-                    } catch (e) {
-                        showToast(`❌ Không tải được mkcert: ${e}`, 'danger');
-                        // Revert ssl toggle
-                        set(s => ({ sites: s.sites.map(s2 => s2.id === id ? { ...s2, ssl: false } : s2) }));
-                        return;
-                    }
-                }
-
-                showToast(`🔐 Đang tạo cert cho ${site.domain}...`, 'info');
-                const certs = await generateCert(settings, site.domain);
-                sslConfig = { ...certs, enabled: true };
-            }
-
-            const result = await invoke('setup_virtual_host', {
-                domain: site.domain,
-                docRoot: site.path,
-                httpdConf,
-                vhostsFile,
-                port: parseInt(settings.port80 || 80),
-                sslEnabled: sslConfig.enabled,
-                sslCert: sslConfig.cert || '',
-                sslKey: sslConfig.key || ''
-            });
-
-            if (result === 'SUCCESS') {
-                const modeLabel = newSslState ? 'HTTPS ✓' : 'HTTP';
-                showToast(`${site.domain} → ${modeLabel}. Đang restart Apache...`, 'ok');
-                await get().restartApache();
-            }
-        } catch (e) {
-            console.error('toggleSiteSSL error:', e);
-            showToast(typeof e === 'string' ? e : `Lỗi: ${e?.message || e}`, 'danger');
-            // Revert on failure
-            set(s => ({ sites: s.sites.map(s2 => s2.id === id ? { ...s2, ssl: !newSslState } : s2) }));
-        }
-    },
 
     setMysqlPort: (port) => set(s => ({
         settings: { ...s.settings, portMySQL: parseInt(port) || 3306 },

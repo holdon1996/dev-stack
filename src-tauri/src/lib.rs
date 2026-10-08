@@ -21,8 +21,20 @@ use tauri_plugin_updater::{Update as TauriPendingUpdate, UpdaterExt};
 
 mod cloudflare_tunnel;
 use cloudflare_tunnel::{
-    cloudflare_is_authenticated, cloudflare_login, prepare_cloudflare_tunnel,
+    cloudflare_is_authenticated, cloudflare_known_routes, cloudflare_login, cloudflare_quick_config,
+    prepare_cloudflare_tunnel, probe_public_url,
 };
+mod procman;
+use procman::{open_devstack_terminal, proc_list, proc_start, proc_stop, proc_stop_all};
+mod site_config;
+use site_config::{
+    apache_config_stale, apache_config_test, apply_apache_sites, build_ca_bundle,
+    ensure_php_extension, flush_dns_and_check, install_php_ext_from_zip, list_files, mkcert_generate,
+    mkcert_install, port_owner, read_text_file, run_program, set_user_env, stop_windows_service, sync_hosts_domains,
+    write_managed_block,
+};
+mod db_tools;
+use db_tools::{mysql_dump, mysql_exec, mysql_import};
 
 #[cfg(target_os = "windows")]
 const WINDOWS_STARTUP_TASK_NAME: &str = "DevStack Startup";
@@ -903,67 +915,67 @@ fn kill_process_by_name_exact(state: tauri::State<'_, AppState>, name: String) -
     any_killed
 }
 
-#[tauri::command]
-fn kill_process_by_port(state: tauri::State<'_, AppState>, port: u16) -> bool {
+/// PID of the process listening on `port` (IPv4), if any.
+fn find_listening_pid(port: u16) -> Option<u32> {
     #[cfg(target_os = "windows")]
     {
-        use windows_sys::Win32::NetworkManagement::IpHelper::{GetExtendedTcpTable, MIB_TCP_STATE_LISTEN};
+        use windows_sys::Win32::NetworkManagement::IpHelper::GetExtendedTcpTable;
         use windows_sys::Win32::Networking::WinSock::AF_INET;
         use windows_sys::Win32::Foundation::NO_ERROR;
-        
+
         // TCP_TABLE_OWNER_PID_LISTENER = 3
         const TCP_TABLE_OWNER_PID_LISTENER: u32 = 3;
-        
+
         // Call once with size=0 to get required buffer size
         let mut size: u32 = 0;
         unsafe { GetExtendedTcpTable(std::ptr::null_mut(), &mut size, 0, AF_INET as u32, TCP_TABLE_OWNER_PID_LISTENER as i32, 0); }
-        
+
         let mut buf: Vec<u8> = vec![0u8; size as usize];
         let ret = unsafe { GetExtendedTcpTable(buf.as_mut_ptr() as *mut _, &mut size, 0, AF_INET as u32, TCP_TABLE_OWNER_PID_LISTENER as i32, 0) };
-        
-        if ret != NO_ERROR {
-            return false;
+
+        if ret != NO_ERROR || buf.len() < 4 {
+            return None;
         }
-        
+
         // Layout of MIB_TCPTABLE_OWNER_PID:
         //   DWORD dwNumEntries
         //   MIB_TCPROW_OWNER_PID table[] -- each row is 6 DWORDs (24 bytes)
         //     [0] dwState, [1] dwLocalAddr, [2] dwLocalPort (network byte order), [3] dwRemoteAddr, [4] dwRemotePort, [5] dwOwningPid
-        let target_port_be = (port as u32).to_be() << 16; // network byte order for 2 bytes
         let num_entries = u32::from_le_bytes(buf[0..4].try_into().unwrap_or([0;4]));
-        
+
         let row_size = 6 * 4usize; // 6 DWORD fields
         let table_start = 4usize; // after dwNumEntries
-        
-        let mut found_pid: Option<u32> = None;
+
         for i in 0..num_entries as usize {
             let base = table_start + i * row_size;
             if base + row_size > buf.len() { break; }
-            
+
             let local_port = u32::from_le_bytes(buf[base+8..base+12].try_into().unwrap_or([0;4]));
             let owning_pid = u32::from_le_bytes(buf[base+20..base+24].try_into().unwrap_or([0;4]));
-            
+
             // local_port is in network byte order (big-endian u16 in high 2 bytes of u32)
             let actual_port = ((local_port >> 8) & 0xFF) | ((local_port & 0xFF) << 8);
-            
+
             if actual_port == port as u32 && owning_pid > 0 {
-                found_pid = Some(owning_pid);
-                break;
+                return Some(owning_pid);
             }
         }
-        
-        if let Some(pid) = found_pid {
-            let mut sys = state.sys.lock().unwrap();
-            sys.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
-            let spid = sysinfo::Pid::from_u32(pid);
-            if let Some(proc) = sys.process(spid) {
-                return proc.kill();
-            }
-        }
-        false
+        None
     }
     #[cfg(not(target_os = "windows"))]
-    { false }
+    { let _ = port; None }
+}
+
+#[tauri::command]
+fn kill_process_by_port(state: tauri::State<'_, AppState>, port: u16) -> bool {
+    if let Some(pid) = find_listening_pid(port) {
+        let mut sys = state.sys.lock().unwrap();
+        sys.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
+        if let Some(proc) = sys.process(sysinfo::Pid::from_u32(pid)) {
+            return proc.kill();
+        }
+    }
+    false
 }
 
 #[tauri::command]
@@ -1135,73 +1147,6 @@ async fn spawn_command_stream(
     });
 
     Ok(pid)
-}
-
-
-/// Run mkcert synchronously to generate SSL certificates for a domain.
-/// Returns {cert, key} paths on success, or an error string.
-#[tauri::command]
-fn run_mkcert(mkcert_exe: String, cert_dir: String, domain: String) -> Result<serde_json::Value, String> {
-    use std::fs;
-    use std::path::Path;
-    use std::process::Command;
-
-    // Ensure cert directory exists
-    fs::create_dir_all(&cert_dir).map_err(|e| format!("Cannot create cert dir: {}", e))?;
-
-    #[cfg(target_os = "windows")]
-    {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x08000000;
-
-        // Step 1: Install mkcert's local CA (requires one-time trust prompt)
-        let install_status = Command::new(&mkcert_exe)
-            .arg("-install")
-            .current_dir(&cert_dir)
-            .creation_flags(CREATE_NO_WINDOW)
-            .status()
-            .map_err(|e| format!("mkcert -install failed: {}", e))?;
-
-        if !install_status.success() {
-            return Err("mkcert -install failed. Make sure mkcert.exe is present.".into());
-        }
-
-        // Step 2: Generate cert for domain — output file is: <domain>.pem + <domain>-key.pem
-        // mkcert names files after the domain: "hiiii.test.pem" + "hiiii.test-key.pem"
-        let gen_output = Command::new(&mkcert_exe)
-            .arg(&domain)
-            .current_dir(&cert_dir)
-            .creation_flags(CREATE_NO_WINDOW)
-            .output()
-            .map_err(|e| format!("mkcert gen failed: {}", e))?;
-
-        if !gen_output.status.success() {
-            let err = String::from_utf8_lossy(&gen_output.stderr);
-            return Err(format!("mkcert failed: {}", err));
-        }
-    }
-    #[cfg(not(target_os = "windows"))]
-    {
-        std::process::Command::new(&mkcert_exe).arg("-install").current_dir(&cert_dir).status().ok();
-        std::process::Command::new(&mkcert_exe).arg(&domain).current_dir(&cert_dir).output().map_err(|e| e.to_string())?;
-    }
-
-    // mkcert always creates: <cert_dir>/<domain>.pem and <cert_dir>/<domain>-key.pem
-    let cert_dir_path = Path::new(&cert_dir);
-    let cert_path = cert_dir_path.join(format!("{}.pem", domain));
-    let key_path = cert_dir_path.join(format!("{}-key.pem", domain));
-
-    if !cert_path.exists() || !key_path.exists() {
-        return Err(format!(
-            "Cert files not found after mkcert ran. Expected: {} and {}",
-            cert_path.display(), key_path.display()
-        ));
-    }
-
-    Ok(serde_json::json!({
-        "cert": cert_path.to_string_lossy().replace("\\", "/"),
-        "key": key_path.to_string_lossy().replace("\\", "/")
-    }))
 }
 
 
@@ -2065,39 +2010,10 @@ fn write_text_file(path: String, content: String) -> Result<(), String> {
     fs::write(path, content).map_err(|e| e.to_string())
 }
 
-#[tauri::command]
-fn patch_apache_paths(new_server_root: String, new_doc_root: String) -> Result<String, String> {
-    use std::fs;
-    use std::path::Path;
-    
-    let sr = new_server_root.replace("\\", "/");
-    let dr = new_doc_root.replace("\\", "/");
-
-    // Extract the apache version from the server root path (e.g. "apache-2.4.62")
-    // new_server_root = "F:/devstack/bin/apache/apache-2.4.62"
-    let apache_folder = Path::new(&new_server_root)
-        .file_name()
-        .map(|n| n.to_string_lossy().into_owned())
-        .unwrap_or_default();
-
-    // Only patch the httpd.conf at the exact path derived from settings.
-    // NEVER scan other drives — that causes cross-drive path corruption
-    // (e.g. writing F:\ paths into a conf file physically at C:\).
-    let conf_path = {
-        let candidate = Path::new(&new_server_root).join("conf").join("httpd.conf");
-        if candidate.exists() {
-            candidate
-        } else {
-            return Err(format!(
-                "httpd.conf not found at '{}'. Check that DevStack directory is correct in Settings and Apache is installed there.",
-                Path::new(&new_server_root).join("conf").join("httpd.conf").display()
-            ));
-        }
-    };
-
-    // Read file as-is — do NOT do a global backslash replace, that corrupts LogFormat strings.
-    let raw = fs::read_to_string(&conf_path).map_err(|e| e.to_string())?;
-    let mut content = raw;
+/// Points httpd.conf at the current DevStack paths. Only targeted directives are
+/// rewritten; every other line (including hand edits) is preserved.
+fn patch_httpd_conf(raw: &str, sr: &str, dr: &str) -> String {
+    let mut content = raw.to_string();
 
     // Helper: normalizes path backslashes, used per-match only
     let norm = |s: &str| s.replace("\\", "/");
@@ -2132,34 +2048,11 @@ fn patch_apache_paths(new_server_root: String, new_doc_root: String) -> Result<S
         "LoadModule include_module modules/mod_include.so",
     );
 
-    // Enable proxy modules so users can configure reverse proxies (e.g. for Vite/React dev server).
-    content = content.replace(
-        "#LoadModule proxy_module modules/mod_proxy.so",
-        "LoadModule proxy_module modules/mod_proxy.so",
-    );
-    content = content.replace(
-        "# LoadModule proxy_module modules/mod_proxy.so",
-        "LoadModule proxy_module modules/mod_proxy.so",
-    );
-    content = content.replace(
-        "#LoadModule proxy_http_module modules/mod_proxy_http.so",
-        "LoadModule proxy_http_module modules/mod_proxy_http.so",
-    );
-    content = content.replace(
-        "# LoadModule proxy_http_module modules/mod_proxy_http.so",
-        "LoadModule proxy_http_module modules/mod_proxy_http.so",
-    );
-    content = content.replace(
-        "#LoadModule proxy_wstunnel_module modules/mod_proxy_wstunnel.so",
-        "LoadModule proxy_wstunnel_module modules/mod_proxy_wstunnel.so",
-    );
-    content = content.replace(
-        "# LoadModule proxy_wstunnel_module modules/mod_proxy_wstunnel.so",
-        "LoadModule proxy_wstunnel_module modules/mod_proxy_wstunnel.so",
-    );
+    // Enable rewrite/proxy/headers modules and the vhosts include that DevStack sites rely on.
+    content = site_config::ensure_vhost_prereqs(&content);
 
     // Ensure a global ServerName exists so Apache does not warn on startup.
-    let re_server_name = regex::Regex::new(r#"(?im)^#?\s*ServerName\s+.+$"#).unwrap();
+    let re_server_name = regex::Regex::new(r#"(?im)^#?ServerName\s+.+$"#).unwrap();
     if re_server_name.is_match(&content) {
         content = re_server_name
             .replace(&content, "ServerName localhost:80")
@@ -2210,8 +2103,95 @@ fn patch_apache_paths(new_server_root: String, new_doc_root: String) -> Result<S
         content.push_str("\r\n");
     }
 
-    fs::write(&conf_path, &content).map_err(|e| e.to_string())?;
+    content
+}
+
+#[tauri::command]
+fn patch_apache_paths(new_server_root: String, new_doc_root: String) -> Result<String, String> {
+    use std::fs;
+    use std::path::Path;
+
+    let sr = new_server_root.replace("\\", "/");
+    let dr = new_doc_root.replace("\\", "/");
+
+    // Only patch the httpd.conf at the exact path derived from settings.
+    // NEVER scan other drives — that causes cross-drive path corruption
+    // (e.g. writing F:\ paths into a conf file physically at C:\).
+    let conf_path = Path::new(&new_server_root).join("conf").join("httpd.conf");
+    if !conf_path.exists() {
+        return Err(format!(
+            "httpd.conf not found at '{}'. Check that DevStack directory is correct in Settings and Apache is installed there.",
+            conf_path.display()
+        ));
+    }
+
+    // Read file as-is — do NOT do a global backslash replace, that corrupts LogFormat strings.
+    let raw = fs::read_to_string(&conf_path).map_err(|e| e.to_string())?;
+    let content = patch_httpd_conf(&raw, &sr, &dr);
+    if content != raw {
+        fs::write(&conf_path, &content).map_err(|e| e.to_string())?;
+    }
     Ok(conf_path.to_string_lossy().to_string())
+}
+
+/// Sets server options inside `[mysqld]`. Server-only options found in client
+/// sections (older builds appended them after `[client]`) are moved, since
+/// `mysql`/`mysqldump` reject them and the server never reads them there.
+fn upsert_mysqld_values(content: &str, values: &[(&str, String)]) -> String {
+    let mut lines: Vec<String> = Vec::new();
+    let mut section = String::new();
+    let mut mysqld_end: Option<usize> = None;
+    let mut seen: Vec<&str> = Vec::new();
+
+    for raw in content.split_inclusive('\n') {
+        let line = raw.trim();
+        let eol = if raw.ends_with("\r\n") { "\r\n" } else if raw.ends_with('\n') { "\n" } else { "\r\n" };
+        if line.starts_with('[') && line.ends_with(']') {
+            section = line[1..line.len() - 1].trim().to_ascii_lowercase();
+            lines.push(raw.to_string());
+            if section == "mysqld" {
+                mysqld_end = Some(lines.len());
+            }
+            continue;
+        }
+        let key = (!line.is_empty() && !line.starts_with('#') && !line.starts_with(';'))
+            .then(|| line.split('=').next().unwrap_or("").trim().to_ascii_lowercase());
+        if let Some((name, value)) = key.and_then(|k| values.iter().find(|(name, _)| *name == k.as_str())) {
+            if section == "mysqld" {
+                lines.push(format!("{name}={value}{eol}"));
+                seen.push(name);
+                mysqld_end = Some(lines.len());
+                continue;
+            }
+            if *name == "port" {
+                lines.push(format!("port={value}{eol}"));
+                continue;
+            }
+            if !(section.starts_with("mysqld") || section == "server") {
+                continue; // drop the misplaced server option; it is re-added under [mysqld]
+            }
+        }
+        lines.push(raw.to_string());
+        if section == "mysqld" && !line.is_empty() {
+            mysqld_end = Some(lines.len());
+        }
+    }
+
+    let missing: String = values
+        .iter()
+        .filter(|(name, _)| !seen.contains(name))
+        .map(|(name, value)| format!("{name}={value}\r\n"))
+        .collect();
+    if let Some(last) = lines.last_mut() {
+        if !last.ends_with('\n') {
+            last.push_str("\r\n");
+        }
+    }
+    match mysqld_end {
+        Some(i) => lines.insert(i, missing),
+        None => lines.insert(0, format!("[mysqld]\r\n{missing}\r\n")),
+    }
+    lines.concat()
 }
 
 #[tauri::command]
@@ -2268,22 +2248,25 @@ fn patch_mysql_paths(ini_path: String, new_mysql_root: String, port: Option<u16>
         }
     };
 
-    content = upsert_ini_value(content, "port", &mysql_port.to_string());
-    content = upsert_ini_value(content, "basedir", &mysql_root);
-    content = upsert_ini_value(content, "datadir", &data_dir);
-    content = upsert_ini_value(content, "character-set-server", "utf8mb4");
-    content = upsert_ini_value(content, "collation-server", "utf8mb4_unicode_ci");
-    content = upsert_ini_value(content, "explicit_defaults_for_timestamp", "ON");
-    content = upsert_ini_value(content, "max_allowed_packet", "1G");
-    content = upsert_ini_value(content, "bind-address", "127.0.0.1");
-    content = upsert_ini_value(content, "innodb_buffer_pool_size", "1G");
-    content = upsert_ini_value(content, "innodb_log_file_size", "256M");
-    content = upsert_ini_value(content, "innodb_flush_log_at_trx_commit", "2");
-    content = upsert_ini_value(content, "innodb_flush_method", "normal");
-    content = upsert_ini_value(content, "tmp_table_size", "256M");
-    content = upsert_ini_value(content, "max_heap_table_size", "256M");
-    content = upsert_ini_value(content, "table_open_cache", "4096");
-    content = upsert_ini_value(content, "thread_cache_size", "32");
+    let server_values = [
+        ("port", mysql_port.to_string()),
+        ("basedir", mysql_root.clone()),
+        ("datadir", data_dir.clone()),
+        ("character-set-server", "utf8mb4".to_string()),
+        ("collation-server", "utf8mb4_unicode_ci".to_string()),
+        ("explicit_defaults_for_timestamp", "ON".to_string()),
+        ("max_allowed_packet", "1G".to_string()),
+        ("bind-address", "127.0.0.1".to_string()),
+        ("innodb_buffer_pool_size", "1G".to_string()),
+        ("innodb_log_file_size", "256M".to_string()),
+        ("innodb_flush_log_at_trx_commit", "2".to_string()),
+        ("innodb_flush_method", "normal".to_string()),
+        ("tmp_table_size", "256M".to_string()),
+        ("max_heap_table_size", "256M".to_string()),
+        ("table_open_cache", "4096".to_string()),
+        ("thread_cache_size", "32".to_string()),
+    ];
+    content = upsert_mysqld_values(&content, &server_values);
     // Keep hostname resolution enabled so legacy apps using `localhost`
     // continue to match `root@localhost` on Windows instead of being
     // rejected as `127.0.0.1`.
@@ -2368,6 +2351,7 @@ fn scan_processes(state: tauri::State<'_, AppState>, dev_dir: String) -> Vec<ser
                       else if name.contains("httpd") || name.contains("apache") { Some("web") }
                       else if name.contains("redis") { Some("cache") }
                       else if name.contains("mailpit") { Some("mail") }
+                      else if name.contains("minio") { Some("storage") }
                       else if name.contains("php") { Some("php") }
                       else { None };
         
@@ -2414,124 +2398,6 @@ fn scan_processes(state: tauri::State<'_, AppState>, dev_dir: String) -> Vec<ser
     }
 
     groups.into_values().collect()
-}
-
-#[tauri::command]
-fn setup_virtual_host(
-    domain: String, 
-    doc_root: String, 
-    httpd_conf: String, 
-    vhosts_file: String, 
-    port: u16,
-    ssl_enabled: bool,
-    ssl_cert: String,
-    ssl_key: String
-) -> Result<String, String> {
-    // 1) Enable required modules and include in httpd.conf
-    if let Ok(mut content) = std::fs::read_to_string(&httpd_conf) {
-        content = content.replace("#LoadModule rewrite_module modules/mod_rewrite.so", "LoadModule rewrite_module modules/mod_rewrite.so");
-        content = content.replace("# LoadModule rewrite_module modules/mod_rewrite.so", "LoadModule rewrite_module modules/mod_rewrite.so");
-        content = content.replace("#Include conf/extra/httpd-vhosts.conf", "Include conf/extra/httpd-vhosts.conf");
-        content = content.replace("# Include conf/extra/httpd-vhosts.conf", "Include conf/extra/httpd-vhosts.conf");
-        
-        if ssl_enabled {
-            content = content.replace("#LoadModule ssl_module modules/mod_ssl.so", "LoadModule ssl_module modules/mod_ssl.so");
-            content = content.replace("# LoadModule ssl_module modules/mod_ssl.so", "LoadModule ssl_module modules/mod_ssl.so");
-            content = content.replace("#LoadModule socache_shmcb_module modules/mod_socache_shmcb.so", "LoadModule socache_shmcb_module modules/mod_socache_shmcb.so");
-            content = content.replace("# LoadModule socache_shmcb_module modules/mod_socache_shmcb.so", "LoadModule socache_shmcb_module modules/mod_socache_shmcb.so");
-            
-            if !content.contains("Listen 443") {
-                // Better placement: insert Listen 443 after Listen 80 or similar
-                if content.contains("Listen 80") {
-                    content = content.replace("Listen 80", "Listen 80\nListen 443");
-                } else {
-                    content.push_str("\nListen 443\n");
-                }
-            }
-        }
-
-        // 1.1) Global Directory Permission Fix for 403 Forbidden
-        // Ensure the root path of projects is allowed in Apache. Use forward slashes.
-        // 1.1) Robust Global Directory Permission Fix for 403 Forbidden
-        let normalized_doc_root = doc_root.replace("\\", "/");
-        let drive_root = if normalized_doc_root.len() >= 3 {
-            &normalized_doc_root[0..3] // e.g. "F:/"
-        } else {
-            "/"
-        };
-        
-        let dir_perm_block = format!(
-            "\n# DevStack Directory Access\n<Directory \"{}\">\n    Options Indexes FollowSymLinks\n    AllowOverride All\n    Require all granted\n</Directory>\n", 
-            drive_root
-        );
-
-        if !content.contains(&format!("<Directory \"{}\">", drive_root)) {
-            content.push_str(&dir_perm_block);
-        }
-
-        let _ = std::fs::write(&httpd_conf, content);
-    }
-
-    // 2) Add VirtualHost block to vhosts file
-    let normalized_root = doc_root.replace("\\", "/");
-    let mut block = format!(
-        "\n<VirtualHost *:{}>\n    DocumentRoot \"{}\"\n    ServerName {}\n    DirectoryIndex index.php index.html\n    <Directory \"{}\">\n        Options Indexes FollowSymLinks\n        AllowOverride All\n        Require all granted\n    </Directory>\n</VirtualHost>\n",
-        port, normalized_root, domain, normalized_root
-    );
-
-    if ssl_enabled {
-        let cert = ssl_cert.replace("\\", "/");
-        let key = ssl_key.replace("\\", "/");
-        block.push_str(&format!(
-            "\n<VirtualHost *:443>\n    DocumentRoot \"{}\"\n    ServerName {}\n    SSLEngine on\n    SSLCertificateFile \"{}\"\n    SSLCertificateKeyFile \"{}\"\n    DirectoryIndex index.php index.html\n    <Directory \"{}\">\n        Options Indexes FollowSymLinks\n        AllowOverride All\n        Require all granted\n    </Directory>\n</VirtualHost>\n",
-            normalized_root, domain, cert, key, normalized_root
-        ));
-    }
-    
-    if let Ok(mut content) = std::fs::read_to_string(&vhosts_file) {
-        // Comment out Apache's default dummy VirtualHost blocks — they point to
-        // non-existent directories and cause 403 errors for all unmatched requests.
-        let dummy_markers = ["dummy-host.example.com", "dummy-host2.example.com"];
-        for marker in &dummy_markers {
-            if content.contains(marker) {
-                let re = regex::Regex::new(&format!(
-                    r"(?ms)^([ \t]*<VirtualHost\b[^>]*>\r?\n.*?{}\r?\n.*?[ \t]*</VirtualHost>[ \t]*\r?\n?)",
-                    regex::escape(marker)
-                )).map_err(|e| e.to_string())?;
-
-                content = re.replace_all(&content, |caps: &regex::Captures| {
-                    caps[1]
-                        .lines()
-                        .map(|line| {
-                            if line.trim_start().starts_with('#') {
-                                line.to_string()
-                            } else {
-                                format!("#{}", line)
-                            }
-                        })
-                        .collect::<Vec<_>>()
-                        .join("\r\n")
-                        + "\r\n"
-                }).to_string();
-            }
-        }
-
-        if !content.contains(&domain) {
-            content.push_str(&block);
-            let _ = std::fs::write(&vhosts_file, content);
-        } else {
-            // Domain already exists — still write back if we cleaned up dummy blocks
-            let _ = std::fs::write(&vhosts_file, content);
-        }
-    }
-
-
-    // 3) Update hosts file (requires admin)
-    sync_hosts_entry(&domain, true).map_err(|_| {
-        "Không thể cập nhật file hosts. Vui lòng cấp quyền Administrator cho ứng dụng.".to_string()
-    })?;
-
-    Ok("SUCCESS".into())
 }
 
 #[tauri::command]
@@ -3281,7 +3147,6 @@ pub fn run() {
             kill_process_by_name_exact,
             start_detached_process,
             update_ini_value,
-            setup_virtual_host,
             configure_apache_php,
             install_binary,
             run_mysql_query,
@@ -3301,13 +3166,40 @@ pub fn run() {
             remove_virtual_host,
             read_file_tail,
             stream_log_file,
-            run_mkcert,
             spawn_command_stream,
             cloudflare_is_authenticated,
             cloudflare_login,
             prepare_cloudflare_tunnel,
             download_file,
-            download_file_with_progress
+            download_file_with_progress,
+            probe_public_url,
+            cloudflare_quick_config,
+            cloudflare_known_routes,
+            proc_start,
+            proc_stop,
+            proc_stop_all,
+            proc_list,
+            open_devstack_terminal,
+            apache_config_stale,
+            apache_config_test,
+            apply_apache_sites,
+            build_ca_bundle,
+            ensure_php_extension,
+            install_php_ext_from_zip,
+            mkcert_generate,
+            mkcert_install,
+            port_owner,
+            read_text_file,
+            sync_hosts_domains,
+            write_managed_block,
+            flush_dns_and_check,
+            list_files,
+            set_user_env,
+            stop_windows_service,
+            run_program,
+            mysql_dump,
+            mysql_exec,
+            mysql_import
         ])
         .setup(|app| {
             let _ = cleanup_webview_state_for_fresh_install();
@@ -3355,4 +3247,38 @@ pub fn run() {
         // then the window closes naturally. No prevent_close needed.
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{patch_httpd_conf, upsert_mysqld_values};
+
+    #[test]
+    fn httpd_patch_keeps_custom_lines_and_is_idempotent() {
+        let conf = "Define SRVROOT \"C:/old\"\r\nServerRoot \"C:/old\"\r\nListen 80\r\n#ServerName www.example.com:80\r\nDocumentRoot \"C:/old/htdocs\"\r\n#LoadModule proxy_module modules/mod_proxy.so\r\nTimeout 600 # my custom line\r\n";
+        let once = patch_httpd_conf(conf, "F:/devstack/bin/apache/apache-2.4.66", "F:/devstack/www");
+        assert!(once.contains("Timeout 600 # my custom line"));
+        assert!(once.contains("ServerRoot \"F:/devstack/bin/apache/apache-2.4.66\""));
+        assert!(once.contains("\nLoadModule proxy_module modules/mod_proxy.so"));
+        assert_eq!(patch_httpd_conf(&once, "F:/devstack/bin/apache/apache-2.4.66", "F:/devstack/www"), once);
+    }
+
+    #[test]
+    fn mysql_server_options_move_out_of_client_section() {
+        let broken = "[mysqld]\nport=3306\nbasedir=F:/m\n\n[client]\nport=3306\ndefault-character-set=utf8mb4\ninnodb_buffer_pool_size=1G\nthread_cache_size=32\n";
+        let values = [
+            ("port", "3307".to_string()),
+            ("basedir", "F:/m".to_string()),
+            ("innodb_buffer_pool_size", "1G".to_string()),
+            ("thread_cache_size", "32".to_string()),
+        ];
+        let fixed = upsert_mysqld_values(broken, &values);
+        let client = &fixed[fixed.find("[client]").unwrap()..];
+        let mysqld = &fixed[..fixed.find("[client]").unwrap()];
+        assert!(!client.contains("innodb_buffer_pool_size") && !client.contains("thread_cache_size"));
+        assert!(client.contains("port=3307") && client.contains("default-character-set=utf8mb4"));
+        assert!(mysqld.contains("innodb_buffer_pool_size=1G") && mysqld.contains("thread_cache_size=32"));
+        assert!(mysqld.contains("port=3307"));
+        assert_eq!(upsert_mysqld_values(&fixed, &values), fixed);
+    }
 }

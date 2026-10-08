@@ -1,6 +1,12 @@
 import React, { useState } from 'react';
 import { useStore } from '../store';
-import { Play, Pause, RotateCcw, Globe, Database, Cpu, Zap, Loader, Power, Mail } from 'lucide-react';
+import { Play, Pause, RotateCcw, Globe, Database, Cpu, Zap, Loader, Power, Mail, HardDrive, ExternalLink, Terminal, Plus, Download } from 'lucide-react';
+import { ConfigStaleBadge } from './PageSites';
+
+const openUrl = async (url) => {
+  const { openUrl: open } = await import('@tauri-apps/plugin-opener');
+  await open(url);
+};
 
 const StatCard = ({ title, value, color }) => (
   <div className="metric-card shine">
@@ -19,7 +25,9 @@ const ServiceRow = ({ service }) => {
   const [isEditingPort, setIsEditingPort] = useState(false);
   const [tempPort, setTempPort] = useState(service.port);
 
-  const Icon = service.type === 'web' ? Globe : service.type === 'db' ? Database : service.type === 'php' ? Cpu : service.type === 'mail' ? Mail : Zap;
+  const Icon = service.type === 'web' ? Globe : service.type === 'db' ? Database : service.type === 'php' ? Cpu : service.type === 'mail' ? Mail : service.type === 'storage' ? HardDrive : Zap;
+  const t = useStore.getState().t;
+  const owner = service.status !== 'running' && !service.useExternal ? service.portOwner : null;
 
   // Get relevant versions for the dropdown
   const getVersions = () => {
@@ -40,16 +48,8 @@ const ServiceRow = ({ service }) => {
     if (service.type === 'db') await setActiveMysql(ver);
   };
 
-  const handleToggle = async () => {
-    if (service.status !== 'running') {
-      const isBusy = (portConflicts[service.port]?.inUse) || (await checkPortConflict(service.port));
-      if (isBusy) {
-        showToast(useStore.getState().t('portBusyAlert', { port: service.port }), 'danger');
-        return;
-      }
-    }
-    await toggleService(service.id);
-  };
+  // toggleService checks which program holds the port and explains it (2.3).
+  const handleToggle = () => toggleService(service.id);
 
   return (
     <div className="flex items-center gap-4 bg-[#1a1c22]/50 border border-white/5 rounded-xl p-4 transition-all hover:bg-[#1a1c22] hover:border-white/10 group mb-3 shadow-sm">
@@ -59,9 +59,14 @@ const ServiceRow = ({ service }) => {
         </span>
         <div className="flex-1 overflow-hidden">
           <div className="text-[14px] font-bold tracking-tight">{service.name}</div>
-          <div className="text-[10px] text-muted font-mono truncate" title={service.path}>
-            {service.path || useStore.getState().t('notRunning')}
+          <div className={`text-[10px] font-mono truncate ${owner ? 'text-danger' : 'text-muted'}`} title={service.path || owner?.exe}>
+            {service.path || (owner ? t('externalHoldsPort') : service.useExternal ? t('usingExternalService') : t('notRunning'))}
           </div>
+          {service.type === 'mail' && (
+            <button type="button" className="text-[10px] text-accent hover:underline flex items-center gap-1" onClick={() => openUrl(`http://127.0.0.1:${useStore.getState().settings.mailUiPort || 8025}`)}>
+              <ExternalLink size={10} /> {t('openMailpitUi')}
+            </button>
+          )}
         </div>
       </div>
 
@@ -115,7 +120,20 @@ const ServiceRow = ({ service }) => {
           )}
         </div>
         <div className="text-[9px] text-muted font-bold tracking-widest uppercase opacity-0 group-hover/port:opacity-100 transition-opacity">{useStore.getState().t('changePort')}</div>
-        {service.portConflict && (
+        {owner && (
+          <div className="mt-1 max-w-[320px] bg-red-500/10 px-2 py-1.5 rounded border border-red-500/20 text-[10px] text-red-300 leading-snug">
+            <div>{t('portOwnedBy', { port: service.port, name: owner.service ? t('windowsServiceLabel', { name: owner.service }) : owner.name, pid: owner.pid, exe: owner.exe || '?' })}</div>
+            <div className="flex flex-wrap gap-1 mt-1">
+              {owner.service && (
+                <button type="button" className="bg-red-500 text-white px-1.5 rounded font-bold" onClick={() => useStore.getState().stopWindowsService(service)}>{t('stopWindowsService')}</button>
+              )}
+              <button type="button" className="bg-red-500/40 text-white px-1.5 rounded font-bold" onClick={() => useStore.getState().killPort(service.port)}>{t('kill')}</button>
+              <button type="button" className="bg-white/10 px-1.5 rounded font-bold" onClick={() => { setTempPort(service.port); setIsEditingPort(true); }}>{t('changePort')}</button>
+              <button type="button" className="bg-white/10 px-1.5 rounded font-bold" onClick={() => useStore.getState().useExternalService(service.id)}>{t('useRunningService')}</button>
+            </div>
+          </div>
+        )}
+        {service.portConflict && !owner && !service.useExternal && (
           <div className="flex items-center gap-2 mt-1 bg-red-500/10 px-1.5 py-0.5 rounded border border-red-500/20 animate-in fade-in zoom-in duration-200">
             <span className="text-[8px] text-red-500 font-bold animate-pulse uppercase tracking-tighter">{useStore.getState().t('portBusy')}</span>
             <button
@@ -179,6 +197,54 @@ const ServiceRow = ({ service }) => {
   );
 };
 
+const MinioPanel = () => {
+  const { services, minioBuckets, listMinioBuckets, createMinioBucket, installMinio, minioCredentials, minioPaths, t } = useStore();
+  const [bucket, setBucket] = useState('');
+  const [installed, setInstalled] = useState(true);
+  const svc = services.find(s => s.type === 'storage');
+  const { user, password } = minioCredentials();
+  const port = svc?.port || 9000;
+
+  React.useEffect(() => {
+    (async () => {
+      const { invoke } = await import('@tauri-apps/api/core');
+      setInstalled(await invoke('path_exists', { path: minioPaths().exe }));
+    })();
+    if (svc?.status === 'running') listMinioBuckets();
+  }, [svc?.status]);
+
+  return (
+    <div className="bg-surface border border-border rounded-xl p-4 mt-2">
+      <div className="flex items-center gap-2 mb-3">
+        <HardDrive size={15} className="text-accent" />
+        <span className="text-[13px] font-bold flex-1">MinIO (S3)</span>
+        {!installed && (
+          <button type="button" className="btn-primary text-[11px] py-1 px-2.5 flex items-center gap-1" onClick={async () => { await installMinio(); setInstalled(true); }}>
+            <Download size={12} /> {t('install')}
+          </button>
+        )}
+        <button type="button" className="btn-ghost text-[11px] py-1 px-2 flex items-center gap-1" onClick={() => openUrl(`http://127.0.0.1:${port + 1}`)} disabled={svc?.status !== 'running'}>
+          <ExternalLink size={11} /> {t('openConsole')}
+        </button>
+      </div>
+      <div className="grid grid-cols-3 gap-3 text-[12px] font-mono mb-3">
+        <div><div className="text-[10px] text-muted font-sans font-bold uppercase">{t('endpoint')}</div>http://127.0.0.1:{port}</div>
+        <div><div className="text-[10px] text-muted font-sans font-bold uppercase">{t('accessKey')}</div>{user}</div>
+        <div><div className="text-[10px] text-muted font-sans font-bold uppercase">{t('secretKey')}</div>{password}</div>
+      </div>
+      <form className="flex gap-2" onSubmit={async (e) => { e.preventDefault(); if (await createMinioBucket(bucket.trim())) setBucket(''); }}>
+        <input aria-label={t('bucketName')} className="input-field flex-1 font-mono text-[12px]" placeholder="na-local" value={bucket} onChange={e => setBucket(e.target.value.toLowerCase())} disabled={svc?.status !== 'running'} />
+        <button type="submit" className="btn-primary text-[12px] flex items-center gap-1" disabled={!bucket.trim() || svc?.status !== 'running'}><Plus size={12} /> {t('createBucket')}</button>
+      </form>
+      {minioBuckets.length > 0 && (
+        <div className="flex flex-wrap gap-1.5 mt-3">
+          {minioBuckets.map(b => <span key={b} className="tag font-mono text-[11px]">{b}</span>)}
+        </div>
+      )}
+    </div>
+  );
+};
+
 const PageServices = () => {
   const { startAll, stopAll, showToast, t, startTime, services, systemStats, isElevated } = useStore();
   const { cpu, ram } = systemStats;
@@ -215,7 +281,16 @@ const PageServices = () => {
           <p className="text-[11px] text-muted font-bold mt-1 uppercase tracking-widest">{t('servicesDesc') || 'Manage Stack'}</p>
         </div>
 
-        <div className="flex gap-2">
+        <div className="flex gap-2 items-center">
+          <ConfigStaleBadge />
+          <div className="flex items-center border border-border rounded-lg overflow-hidden" role="group" aria-label={t('openTerminal')}>
+            <span className="px-2 text-muted"><Terminal size={13} /></span>
+            {[['cmd', 'CMD'], ['powershell', 'PowerShell'], ['bash', 'Git Bash']].map(([shell, label]) => (
+              <button key={shell} type="button" className="px-2 py-1.5 text-[11px] font-bold text-textDim hover:text-accent hover:bg-white/5" title={t('devstackTerminalHint')} onClick={() => useStore.getState().openTerminal(null, shell)}>
+                {label}
+              </button>
+            ))}
+          </div>
           <button className="btn-ghost flex items-center gap-2" onClick={async () => { await startAll(); showToast(t('startingAllServices'), 'ok'); }}>
             <Play size={14} /> {t('startAll') || 'Start All'}
           </button>
@@ -239,6 +314,7 @@ const PageServices = () => {
         <div className="flex flex-col">
           {services.map(s => <ServiceRow key={s.id} service={s} />)}
         </div>
+        <MinioPanel />
       </div>
     </div>
   );

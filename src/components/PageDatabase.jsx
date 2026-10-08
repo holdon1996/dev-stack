@@ -5,6 +5,7 @@ import {
   Check, Download, Loader, RefreshCw, Plus, Link as LinkIcon, Edit2, Terminal
 } from 'lucide-react';
 import { ask } from '@tauri-apps/plugin-dialog';
+import DatabaseTools from './DatabaseTools';
 
 const PageDatabase = () => {
   const {
@@ -159,6 +160,8 @@ const PageDatabase = () => {
               </div>
             </div>
           )}
+
+          <DatabaseTools />
 
           {/* Custom Install Form */}
           <div className="bg-surface border border-dashed border-border rounded-xl p-5">

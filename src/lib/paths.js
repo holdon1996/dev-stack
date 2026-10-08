@@ -32,3 +32,9 @@ export const getRedisDir = (state) => {
 export const getWwwDir = (state) => {
     return state.settings?.rootPath || `${getDevDir(state)}/www`;
 };
+
+export const getCertDir = (state) => `${getBinDir(state)}/apache/certs`;
+
+export const getLogDir = (state) => `${getDevDir(state)}/logs`;
+
+export const toWinPath = (p) => p.replace(/\//g, '\\');

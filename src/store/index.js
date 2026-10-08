@@ -9,6 +9,8 @@ import { createTunnelSlice } from './tunnelSlice';
 import { createUiSlice } from './uiSlice';
 import { createRedisSlice } from './redisSlice';
 import { createNodeSlice } from './nodeSlice';
+import { createSiteSlice } from './siteSlice';
+import { createProcessSlice } from './processSlice';
 
 const mergePersistedVersions = (defaults, savedVersions = []) => {
     const merged = defaults.map(v => {
@@ -44,6 +46,8 @@ export const useStore = create(
             ...createUiSlice(...a),
             ...createRedisSlice(...a),
             ...createNodeSlice(...a),
+            ...createSiteSlice(...a),
+            ...createProcessSlice(...a),
         }),
         {
             name: 'devstack-storage-v3',
@@ -51,6 +55,10 @@ export const useStore = create(
                 settings: state.settings,
                 sites: state.sites,
                 databases: state.databases,
+                siteConfigs: state.siteConfigs,
+                hostsEntries: state.hostsEntries,
+                groupEnvs: state.groupEnvs,
+                tunnelRoutes: state.tunnelRoutes,
                 // Only persist installed/active status, NOT version list (let scraper handle that)
                 phpInstalledVersions: state.phpVersions
                     .filter(v => v.installed || v.active)

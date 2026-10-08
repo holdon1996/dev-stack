@@ -11,9 +11,15 @@ export const getDefaultTunnelName = (site) => {
 const CloudflareTunnelMode = ({ disabled, isInstalled }) => {
   const {
     tunnelMode, tunnelCustomDomain, tunnelCustomName, tunnelHostHeader,
-    cloudflareAuthStatus, sites, t, setTunnelMode, setTunnelCustomDomain,
+    cloudflareAuthStatus, sites, siteConfigs, t, setTunnelMode, setTunnelCustomDomain,
     setTunnelCustomName, setTunnelProtocol, connectCloudflare
   } = useStore();
+  // Suggest the project's public domain and aliases (local .test names cannot be routed).
+  const project = sites.find(site => site.domain === tunnelHostHeader);
+  const cfg = siteConfigs[project?.key];
+  const hostnameSuggestions = cfg?.managed
+    ? [cfg.domain, ...(cfg.aliases || [])].filter(h => h && !/\.(test|localhost|local)$/.test(h))
+    : [];
 
   useEffect(() => {
     if (tunnelMode !== 'custom' || tunnelCustomName || !tunnelHostHeader) return;
@@ -82,9 +88,13 @@ const CloudflareTunnelMode = ({ disabled, isInstalled }) => {
               value={tunnelCustomDomain}
               onChange={(event) => setTunnelCustomDomain(event.target.value)}
               placeholder="app.example.com"
+              list="cloudflare-hostname-suggestions"
               disabled={disabled}
               spellCheck={false}
             />
+            <datalist id="cloudflare-hostname-suggestions">
+              {hostnameSuggestions.map(h => <option key={h} value={h} />)}
+            </datalist>
             <span className="text-[10px] text-muted">{t('customDomainHint')}</span>
           </div>
 
