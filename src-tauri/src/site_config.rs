@@ -238,6 +238,8 @@ pub fn apache_config_test(apache_root: String) -> Result<String, String> {
 pub struct ApplyReport {
     removed_legacy_vhosts: usize,
     removed_manual_ssl: bool,
+    /// A hand-written `# >>> ... >>>` region or balancer is still outside the DevStack block.
+    manual_block_left: bool,
 }
 
 /// Writes the managed SITES block, removes conflicting hand-written vhosts, and
@@ -280,6 +282,8 @@ pub fn apply_apache_sites(
             ));
         }
     }
+    let outside = outside_sites_block(&new_vhosts);
+    let manual_block_left = outside.lines().any(|l| l.trim_start().starts_with("# >>>")) || outside.contains("balancer://");
     new_vhosts = replace_managed_block(&new_vhosts, "SITES", "#", &vhosts_body);
 
     if new_vhosts != old_vhosts {
@@ -294,7 +298,7 @@ pub fn apply_apache_sites(
         return Err(format!("httpd -t failed, changes were rolled back:\n{output}"));
     }
 
-    Ok(ApplyReport { removed_legacy_vhosts, removed_manual_ssl })
+    Ok(ApplyReport { removed_legacy_vhosts, removed_manual_ssl, manual_block_left })
 }
 
 fn modified_secs(path: &Path) -> u64 {

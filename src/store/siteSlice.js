@@ -1,7 +1,7 @@
 import { getApacheDir, getCertDir, getLogDir, getPhpDir, toWinPath as win } from '../lib/paths';
 import { getMkcertPath } from '../lib/ssl';
 import {
-    buildVhosts, defaultSiteConfig, detectFromFiles, fcgiPort, findHostConflicts, isValidHost, legacyDomain,
+    assignFcgiPorts, buildVhosts, defaultSiteConfig, detectFromFiles, fcgiPorts, findHostConflicts, isValidHost, legacyDomain, usesFcgi,
     needsHostsEntry, parseHostsOutsideBlock, parseLegacyVhost, requiresHttps, siteHosts, validateSiteConfig,
 } from '../lib/sites';
 
@@ -29,6 +29,35 @@ export const createSiteSlice = (set, get) => ({
         return sites
             .filter(s => siteConfigs[s.key]?.managed)
             .map(s => ({ key: s.key, path: s.path, cfg: siteConfigs[s.key] }));
+    },
+
+    /** PHP install a FastCGI site runs on: its chosen version, else the active one. */
+    _sitePhp: (cfg) => cfg.phpVersion
+        ? get().phpVersions.find(v => v.version === cfg.phpVersion && v.installed)
+        : get().phpVersions.find(v => v.active && v.installed),
+
+    /** Managed sites plus their php-cgi pool (`fcgi: { ports, php }`) when FastCGI applies. */
+    _sitesWithFcgi: () => get()._managedSites().map(site => {
+        const php = usesFcgi(site.cfg) && Number.isInteger(site.cfg.fcgiPortBase) ? get()._sitePhp(site.cfg) : null;
+        return php ? { ...site, fcgi: { ports: fcgiPorts(site.cfg), php } } : site;
+    }),
+
+    /** Gives each FastCGI site its own port block (kept stable across applies). */
+    _assignFcgiPorts: async () => {
+        const { invoke } = await import('@tauri-apps/api/core');
+        const managed = get()._managedSites();
+        const candidates = Array.from({ length: 200 }, (_, i) => 9300 + i);
+        const busy = await invoke('check_ports_status', { ports: candidates }).catch(() => []);
+        // Ports held by our own pools are not "busy" for the site that owns them.
+        const ours = new Set(Object.entries(get().procs).filter(([id, p]) => id.startsWith('fcgi:') && p.running).map(([id]) => Number(id.split(':').pop())));
+        const busyPorts = candidates.filter((p, i) => busy[i] && !ours.has(p));
+        const bases = assignFcgiPorts(managed, busyPorts);
+        for (const [key, base] of Object.entries(bases)) {
+            if (get().siteConfigs[key].fcgiPortBase !== base) get()._patchSiteConfig(key, { fcgiPortBase: base });
+        }
+        for (const site of managed.filter(s => usesFcgi(s.cfg) && !get()._sitePhp(s.cfg))) {
+            get().showToast(get().t('phpVersionMissing', { version: site.cfg.phpVersion || '?' }), 'warn');
+        }
     },
 
     _activeApacheRoot: () => {
@@ -227,6 +256,8 @@ export const createSiteSlice = (set, get) => ({
                 managed = get()._managedSites();
             }
 
+            await get()._assignFcgiPorts();
+            managed = get()._sitesWithFcgi();
             const vhostsBody = buildVhosts(managed, { port: get().settings.port80 || 80, certDir, logDir });
             const legacyNames = managed.flatMap(s => [legacyDomain(s.key), ...siteHosts(s.cfg)]);
             const report = await invoke('apply_apache_sites', { apacheRoot, vhostsBody, legacyNames });
@@ -240,6 +271,7 @@ export const createSiteSlice = (set, get) => ({
 
             await get().syncHosts({ legacy: legacyHosts });
             await get().ensureFcgiBackends();
+            await get()._remindOldFcgiSetup(report);
 
             const apacheRunning = get().services.find(s => s.type === 'web')?.status === 'running';
             if (restart && apacheRunning) await get().restartApache();
@@ -331,26 +363,63 @@ export const createSiteSlice = (set, get) => ({
         return ok;
     },
 
-    /** Starts one shared php-cgi FastCGI backend per PHP version used by a project. */
+    fcgiProcessId: (key, port) => `fcgi:${key}:${port}`,
+
+    /**
+     * Starts each FastCGI site's own pool (one php-cgi per port, auto-restarted) and
+     * stops pools that are no longer wanted or whose PHP version / ports changed.
+     */
     ensureFcgiBackends: async () => {
-        const versions = [...new Set(get()._managedSites().map(s => s.cfg.phpVersion).filter(Boolean))];
-        for (const version of versions) {
-            const php = get().phpVersions.find(v => v.version === version && v.installed);
-            if (!php) {
-                get().showToast(get().t('phpVersionMissing', { version }), 'warn');
-                continue;
+        const wanted = {};
+        for (const site of get()._sitesWithFcgi().filter(s => s.fcgi)) {
+            const dir = win(getPhpDir(get(), site.fcgi.php));
+            for (const port of site.fcgi.ports) {
+                wanted[get().fcgiProcessId(site.key, port)] = { command: `"${dir}\\php-cgi.exe" -b 127.0.0.1:${port}`, dir };
             }
-            const dir = win(getPhpDir(get(), php));
-            const id = `php-fcgi-${version}`;
+        }
+        for (const [id, proc] of Object.entries(get().procs)) {
+            const isPool = id.startsWith('fcgi:') || id.startsWith('php-fcgi-');
+            if (isPool && proc.running && wanted[id]?.command !== proc.command) await get().stopProcess(id);
+        }
+        for (const [id, { command, dir }] of Object.entries(wanted)) {
             if (get().procs[id]?.running) continue;
             await get().startProcess({
                 id,
-                command: `"${dir}\\php-cgi.exe" -b 127.0.0.1:${fcgiPort(version)}`,
+                command,
                 cwd: dir,
                 pathPrefix: dir,
+                // Default 500: php-cgi would exit after that many requests.
                 env: { PHP_FCGI_MAX_REQUESTS: '0', PHPRC: dir },
                 restart: true,
             });
+        }
+    },
+
+    stopFcgiPools: async () => {
+        const ids = Object.keys(get().procs).filter(id => id.startsWith('fcgi:') || id.startsWith('php-fcgi-'));
+        for (const id of ids) await get().stopProcess(id);
+    },
+
+    /** Pool status for the Services page. */
+    fcgiPools: () => get()._sitesWithFcgi().filter(s => s.fcgi).map(site => ({
+        key: site.key,
+        version: site.fcgi.php.version,
+        ports: site.fcgi.ports,
+        alive: site.fcgi.ports.filter(p => get().procs[get().fcgiProcessId(site.key, p)]?.running).length,
+    })),
+
+    /** The pre-DevStack Hub workaround (manual vhost block + scripts/hub-fcgi.ps1) must go. */
+    _remindOldFcgiSetup: async (report) => {
+        if (!get()._sitesWithFcgi().some(s => s.fcgi)) return;
+        const { invoke } = await import('@tauri-apps/api/core');
+        if (report.manualBlockLeft) get().showToast(get().t('manualFcgiBlockReminder'), 'warn');
+        for (const port of [9201, 9202, 9203, 9204]) {
+            const owner = await invoke('port_owner', { port }).catch(() => null);
+            if (owner && /php-cgi/i.test(owner.name)) {
+                get().showToast(get().t('hubFcgiScriptReminder'), 'warn');
+                get().addServiceLog('apache', get().t('hubFcgiScriptReminder'), 'warn');
+                return;
+            }
         }
     },
 

@@ -61,11 +61,54 @@ export function findHostConflicts(entries) {
     return [...owners].filter(([, keys]) => keys.length > 1).map(([host, keys]) => ({ host, keys }));
 }
 
-/** FastCGI port of the shared php-cgi backend for a PHP version (8.3.30 -> 9083). */
-export const fcgiPort = (phpVersion) => {
-    const [major, minor] = phpVersion.split('.').map(Number);
-    return 9000 + major * 10 + minor;
-};
+// Each FastCGI site gets its own block of ports for its php-cgi pool. A php-cgi on
+// Windows serves one request at a time, so sites must never share processes:
+// service A calling service B while holding the only shared process deadlocks.
+export const FCGI_PORT_START = 9300;
+export const FCGI_BLOCK_SIZE = 10;
+export const FCGI_MAX_PROCESSES = FCGI_BLOCK_SIZE;
+export const DEFAULT_FCGI_PROCESSES = 4;
+// MinIO API/console and the old scripts/hub-fcgi.ps1 workers.
+const RESERVED_PORTS = [9000, 9001, 9201, 9202, 9203, 9204];
+
+/** FastCGI is the default for PHP/Laravel sites; mod_php only when chosen explicitly. */
+export const usesFcgi = (cfg) => cfg.type !== 'proxy' && cfg.phpMode !== 'module';
+
+export const fcgiProcessCount = (cfg) =>
+    Math.min(FCGI_MAX_PROCESSES, Math.max(1, parseInt(cfg.fcgiProcesses, 10) || DEFAULT_FCGI_PROCESSES));
+
+export const fcgiPorts = (cfg) =>
+    Array.from({ length: fcgiProcessCount(cfg) }, (_, i) => cfg.fcgiPortBase + i);
+
+export const balancerName = (key) => `ds-${key.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')}`;
+
+/**
+ * Port block start for every FastCGI site: `{ key: base }`. Existing bases are kept
+ * when their block is still free of overlaps; new blocks skip reserved ports, other
+ * sites' blocks and `busyPorts` (ports another program listens on).
+ */
+export function assignFcgiPorts(sites, busyPorts = []) {
+    const taken = new Set(RESERVED_PORTS);
+    const result = {};
+    const blockOf = (base) => Array.from({ length: FCGI_BLOCK_SIZE }, (_, i) => base + i);
+    const fits = (base) => base >= FCGI_PORT_START && (base - FCGI_PORT_START) % FCGI_BLOCK_SIZE === 0
+        && blockOf(base).every(p => !taken.has(p));
+    const fcgiSites = sites.filter(s => usesFcgi(s.cfg)).sort((a, b) => a.key.localeCompare(b.key));
+
+    for (const { key, cfg } of fcgiSites) {
+        if (Number.isInteger(cfg.fcgiPortBase) && fits(cfg.fcgiPortBase)) {
+            result[key] = cfg.fcgiPortBase;
+            blockOf(cfg.fcgiPortBase).forEach(p => taken.add(p));
+        }
+    }
+    for (const { key } of fcgiSites.filter(s => result[s.key] === undefined)) {
+        let base = FCGI_PORT_START;
+        while (!fits(base) || blockOf(base).some(p => busyPorts.includes(p))) base += FCGI_BLOCK_SIZE;
+        result[key] = base;
+        blockOf(base).forEach(p => taken.add(p));
+    }
+    return result;
+}
 
 export const parseHostList = (text) =>
     [...new Set((text || '').toLowerCase().split(/[\s,]+/).map(h => h.trim()).filter(Boolean))];
@@ -78,6 +121,10 @@ export function validateSiteConfig(cfg) {
     if (cfg.type === 'proxy' && !(cfg.proxyPort >= 1 && cfg.proxyPort <= 65535)) errors.push('siteErrPort');
     // Control characters would let a value inject extra Apache directives.
     if (cfg.type !== 'proxy' && /(^|[\\/])\.\.([\\/]|$)|["*?<>|:\x00-\x1f]/.test(cfg.docRoot || '')) errors.push('siteErrDocRoot');
+    if (usesFcgi(cfg) && cfg.fcgiProcesses !== undefined) {
+        const n = Number(cfg.fcgiProcesses);
+        if (!Number.isInteger(n) || n < 1 || n > FCGI_MAX_PROCESSES) errors.push('siteErrFcgiProcesses');
+    }
     return errors;
 }
 
@@ -122,7 +169,8 @@ export function defaultSiteConfig(folder) {
     return {
         type: 'php', docRoot: '', proxyPort: DEFAULT_VITE_PORT, nginxRewrite: true,
         domain: legacyDomain(folder), aliases: [], ssl: false, httpsRedirect: false,
-        phpVersion: '', group: '', order: 0, processes: [], env: '',
+        phpMode: 'fcgi', phpVersion: '', fcgiProcesses: DEFAULT_FCGI_PROCESSES,
+        group: '', order: 0, processes: [], env: '',
     };
 }
 
@@ -187,13 +235,12 @@ function siteBody(site, ssl) {
     return [
         `DocumentRoot "${root}"`,
         'DirectoryIndex index.php index.html',
-        ...(cfg.phpVersion
+        ...(site.fcgi
             ? [
-                // The trailing "/" and the SCRIPT_FILENAME override are needed on Windows:
-                // otherwise the drive letter is parsed as part of the port / path ("/F:/...").
                 '<FilesMatch "\\.php$">',
-                `    SetHandler "proxy:fcgi://127.0.0.1:${fcgiPort(cfg.phpVersion)}/"`,
+                `    SetHandler "proxy:balancer://${balancerName(site.key)}/"`,
                 '</FilesMatch>',
+                // proxy_fcgi sends a mangled "/F:/..." path on Windows -> php-cgi "No input file specified".
                 'ProxyFCGISetEnvIf "true" SCRIPT_FILENAME "%{DOCUMENT_ROOT}%{reqenv:SCRIPT_NAME}"',
             ]
             : []),
@@ -222,13 +269,35 @@ function vhost(site, { port, ssl, certDir, logDir }) {
     ].join('\r\n');
 }
 
+const loadModule = (name, file) => [`<IfModule !${name}>`, `    LoadModule ${name} modules/${file}`, '</IfModule>'];
+
+/** Server-level balancer over a site's php-cgi pool, shared by its :80 and :443 vhosts. */
+const fcgiBalancer = (site) => [
+    `<Proxy "balancer://${balancerName(site.key)}">`,
+    ...site.fcgi.ports.map(p => `    BalancerMember "fcgi://127.0.0.1:${p}" retry=5`),
+    '    ProxySet lbmethod=bybusyness',
+    '</Proxy>',
+].join('\r\n');
+
 /**
  * Body of the managed `# --- DEVSTACK SITES ---` block in httpd-vhosts.conf.
- * `sites` are `{ key, path, cfg }`; SSL modules and `Listen 443` are emitted only
- * when at least one site has HTTPS enabled.
+ * `sites` are `{ key, path, cfg, fcgi? }` where `fcgi = { ports }` is the site's
+ * php-cgi pool. SSL modules / `Listen 443` and the FastCGI balancer modules are
+ * emitted only when some site needs them.
  */
 export function buildVhosts(sites, { port = 80, certDir, logDir } = {}) {
     const parts = ['# Generated by DevStack (Sites page). Changes inside this block are overwritten.'];
+    const fcgiSites = sites.filter(s => s.fcgi);
+    if (fcgiSites.length) {
+        parts.push([
+            '# FASTCGI POOLS (one php-cgi pool per site; see the Services page)',
+            ...loadModule('proxy_module', 'mod_proxy.so'),
+            ...loadModule('proxy_fcgi_module', 'mod_proxy_fcgi.so'),
+            ...loadModule('slotmem_shm_module', 'mod_slotmem_shm.so'),
+            ...loadModule('proxy_balancer_module', 'mod_proxy_balancer.so'),
+            ...loadModule('lbmethod_bybusyness_module', 'mod_lbmethod_bybusyness.so'),
+        ].join('\r\n'), ...fcgiSites.map(fcgiBalancer));
+    }
     if (sites.some(s => s.cfg.ssl)) {
         parts.push([
             '# SSL CONFIG',

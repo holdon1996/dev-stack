@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { X, Wand2, Play, Square, Plus, Trash2, RefreshCw, Loader, ScrollText } from 'lucide-react';
 import { useStore } from '../store';
-import { SITE_TYPES, domainWarnings, parseHostList, requiresHttps, siteProcesses } from '../lib/sites';
+import { FCGI_MAX_PROCESSES, SITE_TYPES, domainWarnings, fcgiPorts, parseHostList, requiresHttps, siteProcesses } from '../lib/sites';
 
 const Field = ({ label, htmlFor, hint, children }) => (
   <div className="flex flex-col gap-1.5">
@@ -117,6 +117,7 @@ const SiteConfigModal = ({ site, onClose }) => {
       ...draft,
       aliases: parseHostList(aliasText).filter(a => a !== draft.domain),
       proxyPort: parseInt(draft.proxyPort, 10),
+      fcgiProcesses: parseInt(draft.fcgiProcesses, 10),
       order: parseInt(draft.order, 10) || 0,
       processes: custom.filter(p => p.name.trim() && p.command.trim()).map(p => ({ ...p, name: p.name.trim() })),
     });
@@ -203,12 +204,28 @@ const SiteConfigModal = ({ site, onClose }) => {
 
           {draft.type !== 'proxy' && (
             <Section title={t('siteSectionPhp')}>
-              <Field label={t('sitePhpVersion')} htmlFor="site-php" hint={t('sitePhpVersionHint')}>
-                <select id="site-php" className="select-field w-[260px]" value={draft.phpVersion || ''} onChange={e => update({ phpVersion: e.target.value })}>
-                  <option value="">{t('phpGlobalModule')}</option>
-                  {phpVersions.filter(v => v.installed).map(v => <option key={v.version} value={v.version}>{t('phpFastcgiOption', { version: v.version })}</option>)}
-                </select>
-              </Field>
+              <div className="grid grid-cols-[1fr_150px] gap-3">
+                <Field label={t('sitePhpVersion')} htmlFor="site-php" hint={t('sitePhpVersionHint')}>
+                  <select
+                    id="site-php"
+                    className="select-field"
+                    value={draft.phpMode === 'module' ? 'module' : (draft.phpVersion || '')}
+                    onChange={e => update(e.target.value === 'module' ? { phpMode: 'module', phpVersion: '' } : { phpMode: 'fcgi', phpVersion: e.target.value })}
+                  >
+                    <option value="">{t('phpActiveFastcgi', { version: phpVersions.find(v => v.active && v.installed)?.version || '?' })}</option>
+                    {phpVersions.filter(v => v.installed).map(v => <option key={v.version} value={v.version}>{t('phpFastcgiOption', { version: v.version })}</option>)}
+                    <option value="module">{t('phpGlobalModule')}</option>
+                  </select>
+                </Field>
+                {draft.phpMode !== 'module' && (
+                  <Field label={t('fcgiProcesses')} htmlFor="site-fcgi-n" hint={t('fcgiProcessesHint', { max: FCGI_MAX_PROCESSES })}>
+                    <input id="site-fcgi-n" type="number" min="1" max={FCGI_MAX_PROCESSES} className="input-field" value={draft.fcgiProcesses ?? 4} onChange={e => update({ fcgiProcesses: e.target.value })} />
+                  </Field>
+                )}
+              </div>
+              {draft.phpMode !== 'module' && Number.isInteger(saved?.fcgiPortBase) && (
+                <div className="text-[11px] text-muted font-mono mt-2">{t('fcgiPortsLabel', { ports: fcgiPorts(saved).join(', ') })}</div>
+              )}
             </Section>
           )}
 

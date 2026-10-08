@@ -245,6 +245,34 @@ const MinioPanel = () => {
   );
 };
 
+const FcgiPools = () => {
+  const { fcgiPools, procs, t } = useStore();
+  void procs; // re-render when pool processes change
+  const pools = fcgiPools();
+  if (!pools.length) return null;
+  return (
+    <div className="bg-surface border border-border rounded-xl p-4 mt-2">
+      <div className="flex items-center gap-2 mb-1">
+        <Cpu size={15} className="text-accent" />
+        <span className="text-[13px] font-bold">{t('fcgiPoolsTitle')}</span>
+      </div>
+      <div className="text-[11px] text-muted mb-3">{t('fcgiPoolsDesc')}</div>
+      <div className="flex flex-col gap-1.5">
+        {pools.map(pool => (
+          <div key={pool.key} className="grid grid-cols-[1fr_90px_90px_1fr] gap-3 items-center text-[12px]">
+            <span className="font-bold truncate" title={pool.key}>{pool.key}</span>
+            <span className="font-mono text-textDim">PHP {pool.version}</span>
+            <span className={`font-mono font-bold ${pool.alive === pool.ports.length ? 'text-accent' : pool.alive ? 'text-warn' : 'text-danger'}`}>
+              {t('fcgiPoolAlive', { alive: pool.alive, total: pool.ports.length })}
+            </span>
+            <span className="font-mono text-muted truncate">{pool.ports.join(', ')}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
+
 const PageServices = () => {
   const { startAll, stopAll, showToast, t, startTime, services, systemStats, isElevated } = useStore();
   const { cpu, ram } = systemStats;
@@ -314,6 +342,7 @@ const PageServices = () => {
         <div className="flex flex-col">
           {services.map(s => <ServiceRow key={s.id} service={s} />)}
         </div>
+        <FcgiPools />
         <MinioPanel />
       </div>
     </div>

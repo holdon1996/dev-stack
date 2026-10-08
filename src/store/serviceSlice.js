@@ -339,6 +339,7 @@ export const createServiceSlice = (set, get) => ({
 
             const t1 = performance.now();
             if (svc.type === 'storage') await invoke('proc_stop', { id: 'minio' });
+            if (svc.type === 'web') await get().stopFcgiPools();
             await invoke('kill_process_by_name_exact', { name });
             if (svc.type === 'php') await invoke('kill_process_by_name_exact', { name: 'php.exe' });
             console.log(`[Timer] Native Rust kill done in ${(performance.now() - t1).toFixed(2)}ms`);

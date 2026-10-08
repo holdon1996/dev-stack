@@ -130,6 +130,11 @@ export const createApacheSlice = (set, get) => ({
             await invoke('ensure_apache_log_files', {
                 apacheRoot: resolvedRoot
             });
+            // Sites managed before FastCGI pools existed get their pool + vhost on first start.
+            const { usesFcgi } = await import('../lib/sites');
+            if (get()._managedSites().some(s => usesFcgi(s.cfg) && !Number.isInteger(s.cfg.fcgiPortBase))) {
+                await get().applySites({ restart: false });
+            }
             if (!(await get()._apacheConfigOk(resolvedRoot))) return false;
             if (get()._managedSites().some(s => s.cfg.ssl)) {
                 const owner = await invoke('port_owner', { port: 443 });
