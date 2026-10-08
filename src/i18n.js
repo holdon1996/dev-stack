@@ -612,6 +612,13 @@ const translations = {
     manualFcgiBlockReminder: 'httpd-vhosts.conf still has a hand-written block (# >>> ... >>> or balancer://) outside the DevStack block. Remove the "repitte-global local HTTPS" block so it does not clash with the DevStack balancer (enabling HTTPS on a site removes it automatically).',
     phpActiveFastcgi: 'Active PHP ({version}) - FastCGI',
     siteErrFcgiProcesses: 'php-cgi processes must be between 1 and 10',
+    aliasesFor: 'Aliases for {name}',
+    aliasesPlaceholder: 'alias1.test alias2.test',
+    notManagedBadge: 'not managed yet',
+    notManagedHint: 'Default name only: DevStack has not created a vhost or hosts entry for this project. Edit the domain and save, or use the link button, to manage it.',
+    primaryDomainFor: 'Domain for {name}',
+    save: 'Save',
+    saveDomainHint: 'Writes the vhost, certificate (if HTTPS) and the DevStack hosts block, then restarts Apache',
   },
 
   vi: {
@@ -1227,6 +1234,13 @@ const translations = {
     manualFcgiBlockReminder: 'httpd-vhosts.conf vẫn còn khối viết tay (# >>> ... >>> hoặc balancer://) ngoài khối DevStack. Hãy gỡ khối "repitte-global local HTTPS" để không trùng balancer của DevStack (bật HTTPS cho một site sẽ tự gỡ).',
     phpActiveFastcgi: 'PHP đang active ({version}) - FastCGI',
     siteErrFcgiProcesses: 'Số process php-cgi phải từ 1 đến 10',
+    aliasesFor: 'Alias cho {name}',
+    aliasesPlaceholder: 'alias1.test alias2.test',
+    notManagedBadge: 'chưa quản lý',
+    notManagedHint: 'Mới là tên mặc định: DevStack chưa tạo vhost hay dòng hosts cho dự án này. Sửa domain rồi Lưu, hoặc bấm nút liên kết, để DevStack quản lý.',
+    primaryDomainFor: 'Domain cho {name}',
+    save: 'Lưu',
+    saveDomainHint: 'Ghi vhost, chứng chỉ (nếu HTTPS) và khối hosts của DevStack, rồi restart Apache',
   }
 };
 
