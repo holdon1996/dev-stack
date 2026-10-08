@@ -226,3 +226,27 @@ pub fn proc_list() -> Vec<ProcState> {
         })
         .collect()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::spawn_shell;
+    use std::collections::HashMap;
+
+    #[test]
+    fn shell_command_keeps_quotes_env_and_path_prefix() {
+        let env = HashMap::from([("DEVSTACK_PROBE".to_string(), "from-env".to_string())]);
+        let cwd = std::env::temp_dir();
+        let child = spawn_shell(
+            r#"echo "quoted arg" && echo %DEVSTACK_PROBE% && echo %PATH%"#,
+            &cwd.to_string_lossy(),
+            r"C:\devstack-probe\bin",
+            &env,
+        )
+        .unwrap();
+        let out = String::from_utf8_lossy(&child.wait_with_output().unwrap().stdout).to_string();
+        let lines: Vec<&str> = out.lines().map(str::trim).collect();
+        assert_eq!(lines[0], r#""quoted arg""#);
+        assert_eq!(lines[1], "from-env");
+        assert!(lines[2].starts_with(r"C:\devstack-probe\bin;"));
+    }
+}
