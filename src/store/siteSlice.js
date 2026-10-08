@@ -154,6 +154,28 @@ export const createSiteSlice = (set, get) => ({
 
     saveSiteConfig: (key, cfg) => get().saveSiteConfigs({ [key]: cfg }),
 
+    /**
+     * Sets a project's domain + aliases, taking an unmanaged project over with its
+     * detected config. HTTPS is suggested for non-.test domains on take-over only.
+     */
+    saveSiteDomain: async (site, { domain, aliases }) => {
+        try {
+            const current = get().siteConfigs[site.key];
+            const base = current?.managed ? current : await get().detectSiteConfig(site);
+            const ok = await get().saveSiteConfig(site.key, {
+                ...base,
+                domain,
+                aliases: aliases.filter(a => a !== domain),
+                ssl: current?.managed ? base.ssl : base.ssl || !domain.endsWith('.test'),
+            });
+            if (ok) get().showToast(get().t('siteApplied', { domain }), 'ok');
+            return ok;
+        } catch (e) {
+            get().showToast(`${e}`, 'danger');
+            return false;
+        }
+    },
+
     /** "Create vhost" button: take the project over with detected defaults. */
     enableSite: async (site) => {
         const cfg = get().siteConfigs[site.key]?.managed ? get().siteConfigs[site.key] : await get().detectSiteConfig(site);
@@ -232,6 +254,10 @@ export const createSiteSlice = (set, get) => ({
     applySites: async ({ restart = true, legacyHosts = [] } = {}) => {
         const { invoke } = await import('@tauri-apps/api/core');
         const { t, showToast, addServiceLog } = get();
+        if (get().siteApplying) {
+            showToast(t('siteApplyBusy'), 'warn');
+            return false;
+        }
         const apacheRoot = get()._activeApacheRoot();
         if (!apacheRoot) {
             showToast(t('noActiveApache'), 'warn');

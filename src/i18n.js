@@ -619,6 +619,9 @@ const translations = {
     primaryDomainFor: 'Domain for {name}',
     save: 'Save',
     saveDomainHint: 'Writes the vhost, certificate (if HTTPS) and the DevStack hosts block, then restarts Apache',
+    schemeHttps: 'HTTPS',
+    schemeHttp: 'HTTP',
+    siteApplyBusy: 'DevStack is still applying the previous change. Try again in a moment.',
   },
 
   vi: {
@@ -1241,6 +1244,9 @@ const translations = {
     primaryDomainFor: 'Domain cho {name}',
     save: 'Lưu',
     saveDomainHint: 'Ghi vhost, chứng chỉ (nếu HTTPS) và khối hosts của DevStack, rồi restart Apache',
+    schemeHttps: 'HTTPS',
+    schemeHttp: 'HTTP',
+    siteApplyBusy: 'DevStack vẫn đang áp dụng thay đổi trước. Thử lại sau giây lát.',
   }
 };
 

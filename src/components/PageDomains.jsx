@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Globe2, RefreshCw, FileText, Plus, Trash2, Settings2, Link, Download, Wand2, Check, Lock } from 'lucide-react';
+import { Globe2, RefreshCw, FileText, Plus, Trash2, Settings2, Link, Download, Wand2, Check, Lock, Loader } from 'lucide-react';
 import { useStore } from '../store';
 import { applyNameTemplate, domainWarnings, isValidHost, parseHostList, siteHosts, templateName } from '../lib/sites';
 import SiteConfigModal from './SiteConfigModal';
@@ -20,73 +20,84 @@ const Card = ({ title, desc, children, actions }) => (
 
 /** One project: domain + aliases edited in place; saving takes the project over if needed. */
 const ProjectDomainRow = ({ site, onSettings }) => {
-  const { siteConfigs, hostsUnresolved, detectSiteConfig, saveSiteConfig, enableSite, siteApplying, t } = useStore();
+  const { siteConfigs, hostsUnresolved, saveSiteDomain, enableSite, siteApplying, t } = useStore();
   const cfg = siteConfigs[site.key];
   const managed = !!cfg?.managed;
   const savedDomain = managed ? cfg.domain : site.domain;
   const savedAliases = managed ? (cfg.aliases || []).join(' ') : '';
   const [domain, setDomain] = useState(savedDomain);
   const [aliases, setAliases] = useState(savedAliases);
-  useEffect(() => { setDomain(savedDomain); setAliases(savedAliases); }, [savedDomain, savedAliases]);
+  const [saving, setSaving] = useState(false);
+  // Follow the store (e.g. changes from the settings dialog), but never while saving:
+  // a failed apply rolls the store back and must not wipe what the user typed.
+  useEffect(() => {
+    if (!saving) { setDomain(savedDomain); setAliases(savedAliases); }
+  }, [savedDomain, savedAliases]);
 
   const value = domain.trim().toLowerCase();
-  const dirty = value !== savedDomain || aliases.trim() !== savedAliases;
-  const valid = isValidHost(value) && parseHostList(aliases).every(isValidHost);
-  const hosts = [value, ...parseHostList(aliases)].filter(Boolean);
-  const warnings = [...new Set(hosts.flatMap(h => domainWarnings(h)).map(w => w.code))];
+  const aliasList = parseHostList(aliases).filter(a => a !== value);
+  const dirty = value !== savedDomain || aliasList.join(' ') !== savedAliases;
+  const domainValid = isValidHost(value);
+  const aliasesValid = aliasList.every(isValidHost);
+  const warnings = [...new Set([value, ...aliasList].flatMap(h => domainWarnings(h)).map(w => w.code))];
   const unresolved = managed ? siteHosts(cfg).filter(h => hostsUnresolved.includes(h)) : [];
+  const busy = saving || siteApplying;
 
   const save = async () => {
-    const base = managed ? cfg : await detectSiteConfig(site);
-    await saveSiteConfig(site.key, {
-      ...base,
-      domain: value,
-      aliases: parseHostList(aliases).filter(a => a !== value),
-      ssl: managed ? base.ssl : base.ssl || !value.endsWith('.test'),
-    });
+    if (busy || !dirty || !domainValid || !aliasesValid) return;
+    setSaving(true);
+    const ok = await saveSiteDomain(site, { domain: value, aliases: aliasList });
+    setSaving(false);
+    if (ok) { setDomain(value); setAliases(aliasList.join(' ')); }
   };
   const reset = () => { setDomain(savedDomain); setAliases(savedAliases); };
 
   return (
     <form
       className="py-2.5 grid grid-cols-[190px_minmax(0,1fr)_minmax(0,1fr)_auto] gap-3 items-start"
-      onSubmit={(e) => { e.preventDefault(); if (dirty && valid) save(); }}
+      onSubmit={(e) => { e.preventDefault(); save(); }}
     >
       <div className="min-w-0 pt-1.5">
         <div className="text-[12px] font-bold truncate" title={site.key}>{site.key}</div>
         {managed
-          ? <div className="text-[10px] text-accent flex items-center gap-1">{cfg.ssl && <Lock size={9} />}{cfg.ssl ? 'HTTPS' : 'HTTP'}</div>
+          ? <div className="text-[10px] text-accent flex items-center gap-1">{cfg.ssl && <Lock size={9} />}{t(cfg.ssl ? 'schemeHttps' : 'schemeHttp')}</div>
           : <div className="text-[10px] text-muted" title={t('notManagedHint')}>{t('notManagedBadge')}</div>}
       </div>
       <div className="min-w-0">
         <input
           aria-label={t('primaryDomainFor', { name: site.key })}
-          className={`input-field py-1.5 text-[12px] font-mono w-full ${managed ? 'text-info' : 'text-textDim'} ${value && !isValidHost(value) ? 'border-danger' : ''}`}
+          aria-invalid={!domainValid}
+          className={`input-field py-1.5 text-[12px] font-mono w-full ${managed ? 'text-info' : 'text-textDim'} ${!domainValid ? 'border-danger' : ''}`}
           value={domain}
           onChange={(e) => setDomain(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Escape') reset(); }}
+          disabled={saving}
           spellCheck={false}
         />
         {unresolved.length > 0 && <div className="text-[10px] text-danger mt-1">{t('notResolving')}: {unresolved.join(', ')}</div>}
         {warnings.map(code => <div key={code} className="text-[10px] text-warn mt-1">{t(code)}</div>)}
-        {!managed && !dirty && <div className="text-[10px] text-muted mt-1">{t('notManagedHint')}</div>}
       </div>
-      <input
-        aria-label={t('aliasesFor', { name: site.key })}
-        className="input-field py-1.5 text-[12px] font-mono w-full"
-        placeholder={t('aliasesPlaceholder')}
-        value={aliases}
-        onChange={(e) => setAliases(e.target.value)}
-        onKeyDown={(e) => { if (e.key === 'Escape') reset(); }}
-        spellCheck={false}
-      />
+      <div className="min-w-0">
+        <input
+          aria-label={t('aliasesFor', { name: site.key })}
+          aria-invalid={!aliasesValid}
+          className={`input-field py-1.5 text-[12px] font-mono w-full ${!aliasesValid ? 'border-danger' : ''}`}
+          placeholder={t('aliasesPlaceholder')}
+          value={aliases}
+          onChange={(e) => setAliases(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Escape') reset(); }}
+          disabled={saving}
+          spellCheck={false}
+        />
+        {(!domainValid || !aliasesValid) && <div className="text-[10px] text-danger mt-1">{t('siteErrHost')}</div>}
+      </div>
       <div className="flex gap-1.5 pt-0.5">
         {dirty ? (
-          <button type="submit" className="btn-primary py-1 px-2.5 text-[11px] flex items-center gap-1" disabled={!valid || siteApplying} title={t('saveDomainHint')}>
-            <Check size={12} /> {t('save')}
+          <button type="submit" className="btn-primary py-1 px-2.5 text-[11px] flex items-center gap-1" disabled={busy || !domainValid || !aliasesValid} title={t('saveDomainHint')}>
+            {saving ? <Loader size={12} className="animate-spin" /> : <Check size={12} />} {t('save')}
           </button>
         ) : !managed && (
-          <button type="button" className="btn-ghost p-1.5 text-accent" title={t('createVhostSync')} onClick={() => enableSite(site)} disabled={siteApplying}><Link size={13} /></button>
+          <button type="button" className="btn-ghost p-1.5 text-accent" title={t('createVhostSync')} onClick={() => enableSite(site)} disabled={busy}><Link size={13} /></button>
         )}
         <button type="button" className="btn-ghost p-1.5" title={t('siteSettings')} onClick={onSettings}><Settings2 size={13} /></button>
       </div>
@@ -198,6 +209,9 @@ const PageDomains = () => {
 
       <div className="flex-1 overflow-y-auto p-6 flex flex-col gap-5">
         <Card title={t('projectDomains')} desc={t('projectDomainsDesc')}>
+          {sites.some(site => !siteConfigs[site.key]?.managed) && (
+            <p className="text-[11px] text-muted m-0 mb-3"><span className="font-bold">{t('notManagedBadge')}</span>: {t('notManagedHint')}</p>
+          )}
           <div className="grid grid-cols-[190px_minmax(0,1fr)_minmax(0,1fr)_auto] gap-3 text-[10px] font-bold text-muted uppercase tracking-wider pb-1">
             <span>{t('project')}</span><span>{t('primaryDomain')}</span><span>{t('aliases')}</span><span />
           </div>
