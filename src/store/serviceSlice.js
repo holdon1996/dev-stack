@@ -339,17 +339,19 @@ export const createServiceSlice = (set, get) => ({
             const t1 = performance.now();
             if (svc.type === 'storage') await invoke('proc_stop', { id: 'minio' });
             if (svc.type === 'web') await get().stopFcgiPools();
-            await invoke('kill_process_by_name_exact', { name });
+            const killed = await invoke('kill_process_by_name_exact', { name });
             if (svc.type === 'php') await invoke('kill_process_by_name_exact', { name: 'php.exe' });
             console.log(`[Timer] Native Rust kill done in ${(performance.now() - t1).toFixed(2)}ms`);
 
-            let success = await get()._pollUntilStable(id, 'stopped');
-            if (!success && parseInt(svc.port) > 0) {
-                // Started by an elevated DevStack: a normal kill is denied, so retry with UAC.
-                get().addServiceLog(logType, get().t('stopNeedsAdmin'), 'warn');
-                await invoke('kill_process_by_port_admin', { port: parseInt(svc.port) });
-                success = await get()._pollUntilStable(id, 'stopped', 8);
+            if (!killed && parseInt(svc.port) > 0) {
+                // Started by an elevated DevStack: a normal kill is denied, so ask UAC right away.
+                const owner = await invoke('port_owner', { port: parseInt(svc.port) }).catch(() => null);
+                if (owner?.name?.toLowerCase() === name) {
+                    get().addServiceLog(logType, get().t('stopNeedsAdmin'), 'warn');
+                    await invoke('kill_process_by_port_admin', { port: parseInt(svc.port) });
+                }
             }
+            const success = await get()._pollUntilStable(id, 'stopped');
             console.log(`[Timer] Total Stop Time: ${(performance.now() - t0).toFixed(2)}ms`);
 
             if (success) {

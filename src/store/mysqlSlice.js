@@ -145,7 +145,8 @@ export const createMysqlSlice = (set, get) => ({
         if (wasRunning && mysqlSvc) {
             get().showToast(`Đang đổi MySQL sang ${version}...`, 'info');
             get().addServiceLog?.('mysql', `Stopping current MySQL before switching to ${version}...`, 'warn');
-            await get().toggleService(mysqlSvc.id, 'stop');
+            // The old mysqld would keep :3306 and the new version could not start.
+            if (!(await get().toggleService(mysqlSvc.id, 'stop'))) return;
         }
 
         set(s => ({

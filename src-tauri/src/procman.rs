@@ -220,7 +220,8 @@ fn terminal_start_line(shell: &str, cwd: &str) -> Result<String, String> {
             if !git_bash.is_file() {
                 return Err(format!("Git Bash was not found at {}", git_bash.display()));
             }
-            format!("\"{}\" --cd=\"{cwd}\"", git_bash.display())
+            // `start /D` sets the folder; `--cd="F:\"` would mis-parse at a drive root.
+            format!("\"{}\"", git_bash.display())
         }
         _ => "cmd /K title DevStack Terminal".to_string(),
     };
