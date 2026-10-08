@@ -208,42 +208,46 @@ pub fn proc_stop_all() {
     }
 }
 
-/// Opens a new terminal window (cmd, PowerShell or Git Bash) in `cwd` with the
-/// DevStack PATH prefix and environment already set.
-#[tauri::command]
-pub fn open_devstack_terminal(shell: String, cwd: String, path_prefix: String, env: HashMap<String, String>) -> Result<(), String> {
-    let mut cmd = match shell.as_str() {
-        "powershell" => {
-            let mut c = Command::new("powershell");
-            c.args(["-NoExit", "-Command", "$Host.UI.RawUI.WindowTitle = 'DevStack Terminal'"]);
-            c
-        }
+/// `start` command line for a terminal window. `start` gives the shell a console
+/// of its own; spawning it directly would inherit DevStack's redirected stdio and
+/// the window would never show (`npm run tauri dev` pipes it).
+fn terminal_start_line(shell: &str, cwd: &str) -> Result<String, String> {
+    let program = match shell {
+        "powershell" => "powershell -NoExit -Command \"$Host.UI.RawUI.WindowTitle = 'DevStack Terminal'\"".to_string(),
         "bash" => {
-            let program_files = std::env::var("ProgramFiles").unwrap_or_else(|_| "C:\\Program Files".into());
+            let program_files = std::env::var("ProgramFiles").unwrap_or_else(|_| r"C:\Program Files".into());
             let git_bash = Path::new(&program_files).join("Git").join("git-bash.exe");
             if !git_bash.is_file() {
                 return Err(format!("Git Bash was not found at {}", git_bash.display()));
             }
-            let mut c = Command::new(git_bash);
-            c.arg(format!("--cd={cwd}"));
-            c
+            format!("\"{}\" --cd=\"{cwd}\"", git_bash.display())
         }
-        _ => {
-            let mut c = Command::new("cmd");
-            c.args(["/K", "title DevStack Terminal"]);
-            c
-        }
+        _ => "cmd /K title DevStack Terminal".to_string(),
     };
+    Ok(format!("start \"DevStack Terminal\" /D \"{cwd}\" {program}"))
+}
+
+/// Opens a new terminal window (cmd, PowerShell or Git Bash) in `cwd` with the
+/// DevStack PATH prefix and environment already set.
+#[tauri::command]
+pub fn open_devstack_terminal(shell: String, cwd: String, path_prefix: String, env: HashMap<String, String>) -> Result<(), String> {
+    if !Path::new(&cwd).is_dir() {
+        return Err(format!("Folder not found: {cwd}"));
+    }
+    let line = terminal_start_line(&shell, &cwd)?;
+    let mut cmd = crate::site_config::hidden_command("cmd");
     #[cfg(target_os = "windows")]
     {
         use std::os::windows::process::CommandExt;
-        const CREATE_NEW_CONSOLE: u32 = 0x00000010;
-        cmd.creation_flags(CREATE_NEW_CONSOLE);
+        cmd.args(["/D", "/S", "/C"]).raw_arg(format!("\"{line}\""));
     }
     let path = std::env::var("PATH").unwrap_or_default();
     cmd.current_dir(&cwd)
         .env("PATH", format!("{path_prefix};{path}"))
         .envs(&env)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
         .spawn()
         .map(|_| ())
         .map_err(|e| format!("Cannot open terminal: {e}"))
@@ -279,6 +283,13 @@ mod tests {
             .iter()
             .find(|(_, p)| p.parent() == Some(Pid::from_u32(shell_pid)) && p.name().eq_ignore_ascii_case("PING.EXE"))
             .map(|(pid, _)| pid.as_u32())
+    }
+
+    #[test]
+    fn terminal_opens_through_start_with_title_and_folder() {
+        let line = super::terminal_start_line("cmd", r"F:\www\app").unwrap();
+        assert_eq!(line, r#"start "DevStack Terminal" /D "F:\www\app" cmd /K title DevStack Terminal"#);
+        assert!(super::terminal_start_line("powershell", r"C:\x").unwrap().contains("powershell -NoExit"));
     }
 
     #[test]

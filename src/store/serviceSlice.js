@@ -307,7 +307,7 @@ export const createServiceSlice = (set, get) => ({
             const isRunning = svc.status === 'running' || svc.pid;
             get().showToast(get().t('restarting', { name: svc.name }) || `Restarting ${svc.name}...`, 'info');
             if (isRunning) {
-                await get().toggleService(id, 'stop');
+                if (!(await get().toggleService(id, 'stop'))) return;
                 await new Promise(r => setTimeout(r, 500));
             }
             await get().toggleService(id, 'start');
@@ -343,16 +343,23 @@ export const createServiceSlice = (set, get) => ({
             if (svc.type === 'php') await invoke('kill_process_by_name_exact', { name: 'php.exe' });
             console.log(`[Timer] Native Rust kill done in ${(performance.now() - t1).toFixed(2)}ms`);
 
-            const success = await get()._pollUntilStable(id, 'stopped');
+            let success = await get()._pollUntilStable(id, 'stopped');
+            if (!success && parseInt(svc.port) > 0) {
+                // Started by an elevated DevStack: a normal kill is denied, so retry with UAC.
+                get().addServiceLog(logType, get().t('stopNeedsAdmin'), 'warn');
+                await invoke('kill_process_by_port_admin', { port: parseInt(svc.port) });
+                success = await get()._pollUntilStable(id, 'stopped', 8);
+            }
             console.log(`[Timer] Total Stop Time: ${(performance.now() - t0).toFixed(2)}ms`);
 
             if (success) {
                 get().showToast(`${svcLabel} stopped.`, 'ok');
                 get().addServiceLog(logType, `${svcLabel} stopped successfully.`, 'ok');
             } else {
-                get().showToast(`${svcLabel} stopped (force).`, 'warn');
-                get().addServiceLog(logType, `${svcLabel} stopped (force).`, 'warn');
+                get().showToast(get().t('stopFailed', { name: svcLabel }), 'danger');
+                get().addServiceLog(logType, get().t('stopFailed', { name: svcLabel }), 'err');
             }
+            return success;
         } else {
             const owner = await get()._externalPortOwner(svc);
             if (owner) {

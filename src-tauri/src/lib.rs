@@ -1037,7 +1037,7 @@ fn kill_process_by_port_admin(port: u16) -> bool {
 
         // Try killing the process without UAC elevation first, in case the user has rights or UAC is off
         let success = Command::new("taskkill.exe")
-            .args(["/PID", &pid.to_string(), "/F"])
+            .args(["/PID", &pid.to_string(), "/T", "/F"])
             .creation_flags(CREATE_NO_WINDOW)
             .status()
             .map(|status| status.success())
@@ -1054,7 +1054,7 @@ fn kill_process_by_port_admin(port: u16) -> bool {
         shell_execute(
             "runas",
             "taskkill.exe",
-            Some(&format!("/PID {} /F", pid)),
+            Some(&format!("/PID {} /T /F", pid)),
             None,
             0,
         )

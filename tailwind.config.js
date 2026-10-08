@@ -20,9 +20,10 @@ export default {
         warn: '#f5a623',
         danger: '#ff4d6d',
         info: '#3d9cf5',
-        muted: '#6b7280',
+        // Secondary text kept readable at 10-12px on the dark panels (>= 7:1 contrast).
+        muted: '#9ba3b0',
         text: '#f3f4f6',
-        textDim: '#9ca3af',
+        textDim: '#c5cad3',
       },
       boxShadow: {
         glow: '0 0 24px rgba(0,229,160,0.15), inset 0 0 10px rgba(0,229,160,0.05)',

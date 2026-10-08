@@ -183,7 +183,8 @@ export const createApacheSlice = (set, get) => ({
         const apacheRoot = get()._activeApacheRoot();
         // Keep the running instance when the new config would not start.
         if (web?.status === 'running' && apacheRoot && !(await get()._apacheConfigOk(apacheRoot))) return false;
-        await get().toggleService(1, 'stop');
+        // Starting while the old instance still holds :80 only fails with "could not bind".
+        if (web?.status === 'running' && !(await get().toggleService(1, 'stop'))) return false;
         await new Promise(r => setTimeout(r, 1000));
         await get().toggleService(1, 'start');
     },

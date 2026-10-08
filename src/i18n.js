@@ -622,6 +622,8 @@ const translations = {
     schemeHttps: 'HTTPS',
     schemeHttp: 'HTTP',
     siteApplyBusy: 'DevStack is still applying the previous change. Try again in a moment.',
+    stopNeedsAdmin: 'Normal stop was denied (the process runs as Administrator). Asking for Admin rights...',
+    stopFailed: 'Could not stop {name}. It may run as Administrator: approve the UAC prompt, or run DevStack as Administrator.',
   },
 
   vi: {
@@ -1247,6 +1249,8 @@ const translations = {
     schemeHttps: 'HTTPS',
     schemeHttp: 'HTTP',
     siteApplyBusy: 'DevStack vẫn đang áp dụng thay đổi trước. Thử lại sau giây lát.',
+    stopNeedsAdmin: 'Không dừng được theo cách thường (tiến trình chạy bằng quyền Administrator). Đang xin quyền Admin...',
+    stopFailed: 'Không dừng được {name}. Có thể tiến trình chạy bằng quyền Administrator: hãy đồng ý hộp thoại UAC, hoặc chạy DevStack bằng quyền Administrator.',
   }
 };
 
