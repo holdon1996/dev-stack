@@ -25,6 +25,8 @@ export const getApacheDir = (state, version) => {
     return `${getBinDir(state)}/apache/apache-${ver}`;
 };
 
+export const getMailpitExe = (state) => `${getBinDir(state)}/mail/mailpit/mailpit.exe`.replace(/\//g, '\\');
+
 export const getRedisDir = (state) => {
     return `${getBinDir(state)}/redis`;
 };

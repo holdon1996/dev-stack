@@ -860,7 +860,7 @@ async fn install_app_update(app: tauri::AppHandle, state: tauri::State<'_, AppSt
 fn build_default_mysql_ini(mysql_root: &str, mysql_port: u16) -> String {
     let data_dir = format!("{}/data", mysql_root);
     format!(
-        "[mysqld]\r\nport={port}\r\nbasedir={root}\r\ndatadir={data}\r\ncharacter-set-server=utf8mb4\r\ncollation-server=utf8mb4_unicode_ci\r\nexplicit_defaults_for_timestamp=ON\r\nmax_allowed_packet=1G\r\nbind-address=127.0.0.1\r\ninnodb_buffer_pool_size=1G\r\ninnodb_log_file_size=256M\r\ninnodb_flush_log_at_trx_commit=2\r\ninnodb_flush_method=normal\r\ntmp_table_size=256M\r\nmax_heap_table_size=256M\r\ntable_open_cache=4096\r\nthread_cache_size=32\r\n\r\n[client]\r\nport={port}\r\ndefault-character-set=utf8mb4\r\n",
+        "[mysqld]\r\nport={port}\r\nbasedir={root}\r\ndatadir={data}\r\ncharacter-set-server=utf8mb4\r\ncollation-server=utf8mb4_unicode_ci\r\nexplicit_defaults_for_timestamp=ON\r\nmax_allowed_packet=1G\r\nbind-address=127.0.0.1\r\ninnodb_buffer_pool_size=512M\r\ninnodb_log_file_size=256M\r\ninnodb_flush_log_at_trx_commit=2\r\ninnodb_flush_method=normal\r\ntmp_table_size=256M\r\nmax_heap_table_size=256M\r\ntable_open_cache=4096\r\nthread_cache_size=32\r\n\r\n[client]\r\nport={port}\r\ndefault-character-set=utf8mb4\r\n",
         port = mysql_port,
         root = mysql_root,
         data = data_dir
@@ -2134,20 +2134,31 @@ fn patch_apache_paths(new_server_root: String, new_doc_root: String) -> Result<S
     Ok(conf_path.to_string_lossy().to_string())
 }
 
-/// Sets server options inside `[mysqld]`. Server-only options found in client
-/// sections (older builds appended them after `[client]`) are moved, since
-/// `mysql`/`mysqldump` reject them and the server never reads them there.
-fn upsert_mysqld_values(content: &str, values: &[(&str, String)]) -> String {
+/// Sets server options inside `[mysqld]`. `forced` values always win (paths, port,
+/// charset); `defaults` (tuning) are only added when missing, so a user's value is kept.
+/// Server-only options found in client sections (older builds appended them after
+/// `[client]`) are moved with their value, since `mysql`/`mysqldump` reject them
+/// there and the server never reads them.
+fn upsert_mysqld_values(content: &str, forced: &[(&str, String)], defaults: &[(&str, String)]) -> String {
     let mut lines: Vec<String> = Vec::new();
     let mut section = String::new();
     let mut mysqld_end: Option<usize> = None;
     let mut seen: Vec<&str> = Vec::new();
+    let mut moved: Vec<(&str, String)> = Vec::new();
+    let all: Vec<(&str, &String, bool)> = forced.iter().map(|(k, v)| (*k, v, true))
+        .chain(defaults.iter().map(|(k, v)| (*k, v, false)))
+        .collect();
+    // MySQL treats '-' and '_' in option names as the same.
+    let canonical = |k: &str| k.trim().to_ascii_lowercase().replace('-', "_");
+    // Notepad may save a UTF-8 BOM, which would hide the first section header.
+    let content = content.strip_prefix('\u{feff}').unwrap_or(content);
 
     for raw in content.split_inclusive('\n') {
         let line = raw.trim();
         let eol = if raw.ends_with("\r\n") { "\r\n" } else if raw.ends_with('\n') { "\n" } else { "\r\n" };
-        if line.starts_with('[') && line.ends_with(']') {
-            section = line[1..line.len() - 1].trim().to_ascii_lowercase();
+        let header = line.split(['#', ';']).next().unwrap_or("").trim();
+        if header.starts_with('[') && header.ends_with(']') {
+            section = header[1..header.len() - 1].trim().to_ascii_lowercase();
             lines.push(raw.to_string());
             if section == "mysqld" {
                 mysqld_end = Some(lines.len());
@@ -2155,20 +2166,25 @@ fn upsert_mysqld_values(content: &str, values: &[(&str, String)]) -> String {
             continue;
         }
         let key = (!line.is_empty() && !line.starts_with('#') && !line.starts_with(';'))
-            .then(|| line.split('=').next().unwrap_or("").trim().to_ascii_lowercase());
-        if let Some((name, value)) = key.and_then(|k| values.iter().find(|(name, _)| *name == k.as_str())) {
+            .then(|| canonical(line.split('=').next().unwrap_or("")));
+        if let Some((name, value, is_forced)) = key.and_then(|k| all.iter().find(|(name, _, _)| canonical(name) == k).copied()) {
             if section == "mysqld" {
-                lines.push(format!("{name}={value}{eol}"));
+                lines.push(if is_forced { format!("{name}={value}{eol}") } else { raw.to_string() });
                 seen.push(name);
                 mysqld_end = Some(lines.len());
                 continue;
             }
-            if *name == "port" {
+            if name == "port" {
                 lines.push(format!("port={value}{eol}"));
                 continue;
             }
             if !(section.starts_with("mysqld") || section == "server") {
-                continue; // drop the misplaced server option; it is re-added under [mysqld]
+                // Misplaced server option: drop it here, re-add it under [mysqld] (keeping the user's value).
+                let existing = line.splitn(2, '=').nth(1).unwrap_or("").trim().to_string();
+                if !is_forced && !existing.is_empty() {
+                    moved.push((name, existing));
+                }
+                continue;
             }
         }
         lines.push(raw.to_string());
@@ -2177,10 +2193,16 @@ fn upsert_mysqld_values(content: &str, values: &[(&str, String)]) -> String {
         }
     }
 
-    let missing: String = values
+    let missing: String = all
         .iter()
-        .filter(|(name, _)| !seen.contains(name))
-        .map(|(name, value)| format!("{name}={value}\r\n"))
+        .filter(|(name, _, _)| !seen.contains(name))
+        .map(|(name, value, is_forced)| {
+            let value = if *is_forced { (*value).clone() } else {
+                // MySQL uses the last occurrence of a repeated option.
+                moved.iter().rfind(|(m, _)| m == name).map(|(_, v)| v.clone()).unwrap_or_else(|| (*value).clone())
+            };
+            format!("{name}={value}\r\n")
+        })
         .collect();
     if let Some(last) = lines.last_mut() {
         if !last.ends_with('\n') {
@@ -2248,16 +2270,19 @@ fn patch_mysql_paths(ini_path: String, new_mysql_root: String, port: Option<u16>
         }
     };
 
-    let server_values = [
+    let forced_values = [
         ("port", mysql_port.to_string()),
         ("basedir", mysql_root.clone()),
         ("datadir", data_dir.clone()),
         ("character-set-server", "utf8mb4".to_string()),
         ("collation-server", "utf8mb4_unicode_ci".to_string()),
         ("explicit_defaults_for_timestamp", "ON".to_string()),
-        ("max_allowed_packet", "1G".to_string()),
         ("bind-address", "127.0.0.1".to_string()),
-        ("innodb_buffer_pool_size", "1G".to_string()),
+    ];
+    // Tuning defaults: added when missing, never overwritten, so users can lower them.
+    let tuning_defaults = [
+        ("max_allowed_packet", "1G".to_string()),
+        ("innodb_buffer_pool_size", "512M".to_string()),
         ("innodb_log_file_size", "256M".to_string()),
         ("innodb_flush_log_at_trx_commit", "2".to_string()),
         ("innodb_flush_method", "normal".to_string()),
@@ -2266,7 +2291,7 @@ fn patch_mysql_paths(ini_path: String, new_mysql_root: String, port: Option<u16>
         ("table_open_cache", "4096".to_string()),
         ("thread_cache_size", "32".to_string()),
     ];
-    content = upsert_mysqld_values(&content, &server_values);
+    content = upsert_mysqld_values(&content, &forced_values, &tuning_defaults);
     // Keep hostname resolution enabled so legacy apps using `localhost`
     // continue to match `root@localhost` on Windows instead of being
     // rejected as `127.0.0.1`.
@@ -3266,19 +3291,40 @@ mod tests {
     #[test]
     fn mysql_server_options_move_out_of_client_section() {
         let broken = "[mysqld]\nport=3306\nbasedir=F:/m\n\n[client]\nport=3306\ndefault-character-set=utf8mb4\ninnodb_buffer_pool_size=1G\nthread_cache_size=32\n";
-        let values = [
-            ("port", "3307".to_string()),
-            ("basedir", "F:/m".to_string()),
-            ("innodb_buffer_pool_size", "1G".to_string()),
-            ("thread_cache_size", "32".to_string()),
-        ];
-        let fixed = upsert_mysqld_values(broken, &values);
+        let forced = [("port", "3307".to_string()), ("basedir", "F:/m".to_string())];
+        let defaults = [("innodb_buffer_pool_size", "512M".to_string()), ("thread_cache_size", "32".to_string())];
+        let fixed = upsert_mysqld_values(broken, &forced, &defaults);
         let client = &fixed[fixed.find("[client]").unwrap()..];
         let mysqld = &fixed[..fixed.find("[client]").unwrap()];
         assert!(!client.contains("innodb_buffer_pool_size") && !client.contains("thread_cache_size"));
         assert!(client.contains("port=3307") && client.contains("default-character-set=utf8mb4"));
+        // The misplaced 1G keeps its value when moved; it is not reset to the 512M default.
         assert!(mysqld.contains("innodb_buffer_pool_size=1G") && mysqld.contains("thread_cache_size=32"));
         assert!(mysqld.contains("port=3307"));
-        assert_eq!(upsert_mysqld_values(&fixed, &values), fixed);
+        assert_eq!(upsert_mysqld_values(&fixed, &forced, &defaults), fixed);
+    }
+
+    #[test]
+    fn mysql_tuning_defaults_never_overwrite_user_values() {
+        let user = "[mysqld]\r\nport=3306\r\ninnodb_buffer_pool_size=256M\r\n";
+        let forced = [("port", "3306".to_string())];
+        let defaults = [("innodb_buffer_pool_size", "512M".to_string()), ("table_open_cache", "4096".to_string())];
+        let out = upsert_mysqld_values(user, &forced, &defaults);
+        assert!(out.contains("innodb_buffer_pool_size=256M") && !out.contains("512M"));
+        assert!(out.contains("table_open_cache=4096"));
+        let fresh = upsert_mysqld_values("[mysqld]\r\n", &forced, &defaults);
+        assert!(fresh.contains("innodb_buffer_pool_size=512M"));
+
+        // Hyphenated spelling is the same option and is kept as written.
+        let hyphen = upsert_mysqld_values("[mysqld]\r\ninnodb-buffer-pool-size=256M\r\n", &forced, &defaults);
+        assert!(hyphen.contains("innodb-buffer-pool-size=256M") && !hyphen.contains("512M"));
+
+        // BOM + commented header still parse as [mysqld]; empty / repeated misplaced values.
+        let messy = "\u{feff}[mysqld] # server\r\nport=3306\r\n[client]\r\ninnodb_buffer_pool_size=\r\ntable_open_cache=100\r\ntable_open_cache=200\r\n";
+        let out = upsert_mysqld_values(messy, &forced, &defaults);
+        assert_eq!(out.matches("[mysqld]").count(), 1);
+        assert!(out.contains("innodb_buffer_pool_size=512M") && out.contains("table_open_cache=200") && !out.contains("table_open_cache=100"));
+        let mysqld = &out[..out.find("[client]").unwrap()];
+        assert!(mysqld.contains("table_open_cache=200"));
     }
 }

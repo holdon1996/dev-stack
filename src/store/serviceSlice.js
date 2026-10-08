@@ -1,4 +1,4 @@
-import { getApacheDir, getMysqlDir, getRedisDir, getPhpDir } from '../lib/paths';
+import { getApacheDir, getMailpitExe, getMysqlDir, getRedisDir } from '../lib/paths';
 
 const getVersionFromServicePath = (path, prefix) => {
     const normalized = (path || '').replace(/\\/g, '/');
@@ -69,8 +69,7 @@ export const createServiceSlice = (set, get) => ({
 
     startMailpit: async () => {
         const settings = get().settings;
-        const baseDir = (settings.devStackDir || 'C:/devstack').replace(/[\\\/]+$/, '');
-        const mailpitExe = `${baseDir}/bin/mail/mailpit/mailpit.exe`.replace(/\//g, '\\');
+        const mailpitExe = getMailpitExe(get());
         const host = settings.mailHost || '127.0.0.1';
         const smtpPort = parseInt(settings.mailSmtpPort || 1025, 10);
         const uiPort = parseInt(settings.mailUiPort || 8025, 10);
@@ -544,13 +543,17 @@ export const createServiceSlice = (set, get) => ({
         await get().ensurePhpCaConfig();
         get().loadHostsFile();
 
-        if (get().settings.autoStartMap?.[5] === undefined) {
+        const { invoke } = await import('@tauri-apps/api/core');
+        const mailpitInstalled = await invoke('path_exists', { path: getMailpitExe(get()) }).catch(() => false);
+        // Mailpit auto-starts by default once it is installed (.env files expect SMTP on :1025).
+        if (mailpitInstalled && get().settings.autoStartMap?.[5] === undefined) {
             get().updateSettings({ autoStartMap: { ...(get().settings.autoStartMap || {}), 5: true } });
         }
         const autoMap = get().settings.autoStartMap || {};
         get().services.forEach(svc => {
             if (svc.type !== 'php' && autoMap[svc.id] === true && svc.status !== 'running') {
                 if (svc.portConflict?.inUse) return; // Prevent infinite spinning
+                if (svc.type === 'mail' && !mailpitInstalled) return; // nothing to start; no toast at launch
                 get().toggleService(svc.id);
             }
         });
