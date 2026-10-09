@@ -152,6 +152,14 @@ fn drop_vhosts(text: &str, names: &[String]) -> (String, usize) {
 
 /// Removes hand-written vhosts for hosts that DevStack now manages, without touching
 /// the managed SITES block itself.
+/// Every ServerName / ServerAlias host in `text`.
+fn vhost_hosts(text: &str) -> std::collections::BTreeSet<String> {
+    text.lines()
+        .filter_map(|l| host_tokens(l.trim(), "ServerName").or_else(|| host_tokens(l.trim(), "ServerAlias")))
+        .flatten()
+        .collect()
+}
+
 pub fn remove_vhosts_outside_block(content: &str, names: &[String]) -> (String, usize) {
     let names: Vec<String> = names.iter().map(|n| n.to_ascii_lowercase()).collect();
     match block_range(content, "SITES", "#") {
@@ -237,6 +245,8 @@ pub fn apache_config_test(apache_root: String) -> Result<String, String> {
 #[serde(rename_all = "camelCase")]
 pub struct ApplyReport {
     removed_legacy_vhosts: usize,
+    /// Host names (ServerName / ServerAlias) of the hand-written vhosts that were removed.
+    removed_hosts: Vec<String>,
     removed_manual_ssl: bool,
     /// A hand-written `# >>> ... >>>` region or balancer is still outside the DevStack block.
     manual_block_left: bool,
@@ -298,7 +308,14 @@ pub fn apply_apache_sites(
         return Err(format!("httpd -t failed, changes were rolled back:\n{output}"));
     }
 
-    Ok(ApplyReport { removed_legacy_vhosts, removed_manual_ssl, manual_block_left })
+    let still_there = vhost_hosts(&outside_sites_block(&new_vhosts));
+    let mut removed_hosts: Vec<String> = vhost_hosts(&outside_sites_block(&old_vhosts))
+        .into_iter()
+        .filter(|h| !still_there.contains(h))
+        .collect();
+    removed_hosts.sort();
+
+    Ok(ApplyReport { removed_legacy_vhosts, removed_hosts, removed_manual_ssl, manual_block_left })
 }
 
 fn modified_secs(path: &Path) -> u64 {
@@ -418,9 +435,11 @@ pub fn sync_hosts_domains(entries: Vec<HostEntry>, remove: Vec<String>, legacy: 
     let entries: Vec<(String, String)> = entries.into_iter().map(|e| (e.ip, e.host)).collect();
     let path = Path::new(HOSTS_PATH);
     let bytes = fs::read(path).map_err(|e| e.to_string())?;
-    let old = String::from_utf8_lossy(crate::strip_utf8_bom(&bytes)).to_string();
+    let body = crate::strip_utf8_bom(&bytes);
+    let stacked_boms = bytes.len() - body.len() > 3;
+    let old = String::from_utf8_lossy(body).to_string();
     let new = sync_hosts_content(&old, &entries, &remove, &legacy);
-    if old == new {
+    if old == new && !stacked_boms {
         return Ok(());
     }
     let mut out = Vec::new();

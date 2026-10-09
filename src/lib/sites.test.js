@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-    buildVhosts, detectFromFiles, domainWarnings, findHostConflicts, assignFcgiPorts, usesFcgi, parseLegacyVhost,
+    buildVhosts, declaredVitePort, detectFromFiles, domainWarnings, proxyPortsInVhosts, findHostConflicts, assignFcgiPorts, usesFcgi, parseLegacyVhost,
     templateName, applyNameTemplate, validateSiteConfig, defaultSiteConfig, parseHostsOutsideBlock,
     parseEnvText, siteProcesses,
 } from './sites.js';
@@ -14,6 +14,24 @@ test('detects Laravel, Vite and plain PHP projects', () => {
     const pkg = JSON.stringify({ devDependencies: { vite: '^5' } });
     assert.deepEqual(detectFromFiles({ packageJson: pkg }, [5173, 5174]), { type: 'proxy', proxyPort: 5175 });
     assert.deepEqual(detectFromFiles({ packageJson: '{}' }), { type: 'php', docRoot: '' });
+});
+
+test('uses the dev port a Vite project declares', () => {
+    const pkg = (dev) => JSON.stringify({ devDependencies: { vite: '^5' }, scripts: { dev } });
+    assert.equal(declaredVitePort({ packageJson: pkg('vite --port 5181 --host') }), 5181);
+    assert.equal(declaredVitePort({ packageJson: pkg('vite --port=5182') }), 5182);
+    assert.equal(declaredVitePort({ packageJson: pkg('vite'), viteConfig: 'export default { server: { host: true, port: 3000 } }' }), 3000);
+    assert.equal(declaredVitePort({ packageJson: pkg('vite'), viteConfig: 'export default { preview: { port: 4000 } }' }), null);
+    // Nested hmr.port and a later preview.port are not the dev server port.
+    assert.equal(declaredVitePort({ packageJson: pkg('vite'), viteConfig: 'export default { server: { hmr: { port: 24678 }, port: 3000 } }' }), 3000);
+    assert.equal(declaredVitePort({ packageJson: pkg('vite'), viteConfig: 'export default { server: { host: true }, preview: { port: 4173 } }' }), null);
+    // A declared port wins even when another project already uses it.
+    assert.deepEqual(detectFromFiles({ packageJson: pkg('vite --port 5173') }, [5173]), { type: 'proxy', proxyPort: 5173 });
+});
+
+test('reads proxy ports of hand-written vhosts', () => {
+    const conf = 'ProxyPass / http://127.0.0.1:5173/\n    ProxyPass / http://localhost:8081/\n# ProxyPass / http://127.0.0.1:9999/\n';
+    assert.deepEqual(proxyPortsInVhosts(conf), [5173, 8081]);
 });
 
 test('imports settings from a hand-written vhost', () => {

@@ -1,19 +1,26 @@
 import React, { useEffect, useState } from 'react';
 import { X, Wand2, Play, Square, Plus, Trash2, RefreshCw, Loader, ScrollText } from 'lucide-react';
 import { useStore } from '../store';
+import HelpTip from './HelpTip';
 import { FCGI_MAX_PROCESSES, SITE_TYPES, domainWarnings, fcgiPorts, parseHostList, requiresHttps, siteProcesses } from '../lib/sites';
 
-const Field = ({ label, htmlFor, hint, children }) => (
+const Field = ({ label, htmlFor, hint, help, children }) => (
   <div className="flex flex-col gap-1.5">
-    <label htmlFor={htmlFor} className="text-[12px] font-semibold text-textDim">{label}</label>
+    <span className="flex items-center gap-1">
+      <label htmlFor={htmlFor} className="text-[12px] font-semibold text-textDim">{label}</label>
+      {help && <HelpTip textKey={help.key} anchor={help.anchor} />}
+    </span>
     {children}
     {hint && <span className="text-[10px] text-muted">{hint}</span>}
   </div>
 );
 
-const Section = ({ title, children }) => (
+const Section = ({ title, help, children }) => (
   <section className="border-t border-border pt-4 mt-4 first:border-0 first:pt-0 first:mt-0">
-    <h3 className="text-[11px] font-bold text-muted tracking-[0.08em] uppercase mb-3">{title}</h3>
+    <h3 className="text-[11px] font-bold text-muted tracking-[0.08em] uppercase mb-3 flex items-center gap-1">
+      {title}
+      {help && <HelpTip textKey={help.key} anchor={help.anchor} />}
+    </h3>
     {children}
   </section>
 );
@@ -136,7 +143,7 @@ const SiteConfigModal = ({ site, onClose }) => {
         </div>
 
         <div className="flex-1 overflow-y-auto p-5">
-          <Section title={t('siteSectionType')}>
+          <Section title={t('siteSectionType')} help={{ key: 'help_siteType', anchor: 'recipe-team' }}>
             <div className="grid grid-cols-[160px_1fr_auto] gap-3 items-end">
               <Field label={t('siteType')} htmlFor="site-type">
                 <select id="site-type" className="select-field" value={draft.type} onChange={e => update({ type: e.target.value })}>
@@ -144,7 +151,7 @@ const SiteConfigModal = ({ site, onClose }) => {
                 </select>
               </Field>
               {draft.type === 'proxy' ? (
-                <Field label={t('proxyPort')} htmlFor="site-port" hint={t('proxyPortHint')}>
+                <Field label={t('proxyPort')} htmlFor="site-port" hint={t('proxyPortHint')} help={{ key: 'help_proxyPort', anchor: 'recipe-vite' }}>
                   <input id="site-port" type="number" min="1" max="65535" className="input-field" value={draft.proxyPort} onChange={e => update({ proxyPort: e.target.value })} />
                 </Field>
               ) : (
@@ -164,7 +171,7 @@ const SiteConfigModal = ({ site, onClose }) => {
             )}
           </Section>
 
-          <Section title={t('siteSectionDomain')}>
+          <Section title={t('siteSectionDomain')} help={{ key: 'help_https', anchor: 'troubleshooting' }}>
             <div className="grid grid-cols-2 gap-3">
               <Field label={t('primaryDomain')} htmlFor="site-domain">
                 <input id="site-domain" className="input-field font-mono" value={draft.domain} onChange={e => setDomain(e.target.value)} spellCheck={false} />
@@ -205,7 +212,7 @@ const SiteConfigModal = ({ site, onClose }) => {
           {draft.type !== 'proxy' && (
             <Section title={t('siteSectionPhp')}>
               <div className="grid grid-cols-[1fr_150px] gap-3">
-                <Field label={t('sitePhpVersion')} htmlFor="site-php" hint={t('sitePhpVersionHint')}>
+                <Field label={t('sitePhpVersion')} htmlFor="site-php" hint={t('sitePhpVersionHint')} help={{ key: 'help_phpMode', anchor: 'troubleshooting' }}>
                   <select
                     id="site-php"
                     className="select-field"
@@ -218,7 +225,7 @@ const SiteConfigModal = ({ site, onClose }) => {
                   </select>
                 </Field>
                 {draft.phpMode !== 'module' && (
-                  <Field label={t('fcgiProcesses')} htmlFor="site-fcgi-n" hint={t('fcgiProcessesHint', { max: FCGI_MAX_PROCESSES })}>
+                  <Field label={t('fcgiProcesses')} htmlFor="site-fcgi-n" hint={t('fcgiProcessesHint', { max: FCGI_MAX_PROCESSES })} help={{ key: 'help_fcgiProcesses' }}>
                     <input id="site-fcgi-n" type="number" min="1" max={FCGI_MAX_PROCESSES} className="input-field" value={draft.fcgiProcesses ?? 4} onChange={e => update({ fcgiProcesses: e.target.value })} />
                   </Field>
                 )}
@@ -229,7 +236,7 @@ const SiteConfigModal = ({ site, onClose }) => {
             </Section>
           )}
 
-          <Section title={t('siteSectionGroup')}>
+          <Section title={t('siteSectionGroup')} help={{ key: 'help_group', anchor: 'recipe-team' }}>
             <div className="grid grid-cols-[1fr_120px] gap-3">
               <Field label={t('groupName')} htmlFor="site-group" hint={t('groupNameHint')}>
                 <input id="site-group" list="site-groups" className="input-field" value={draft.group || ''} onChange={e => update({ group: e.target.value.trim() })} />
@@ -251,7 +258,7 @@ const SiteConfigModal = ({ site, onClose }) => {
             </div>
           </Section>
 
-          <Section title={t('siteSectionProcesses')}>
+          <Section title={t('siteSectionProcesses')} help={{ key: 'help_processes', anchor: 'recipe-team' }}>
             {saved?.managed && <SiteProcessList site={site} cfg={saved} />}
             <div className="flex flex-col gap-2 mt-3">
               {custom.map((proc, i) => (

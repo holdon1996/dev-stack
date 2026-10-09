@@ -68,8 +68,8 @@ export const FCGI_PORT_START = 9300;
 export const FCGI_BLOCK_SIZE = 10;
 export const FCGI_MAX_PROCESSES = FCGI_BLOCK_SIZE;
 export const DEFAULT_FCGI_PROCESSES = 4;
-// MinIO API/console and the old scripts/hub-fcgi.ps1 workers.
-const RESERVED_PORTS = [9000, 9001, 9201, 9202, 9203, 9204];
+// MinIO API/console.
+const RESERVED_PORTS = [9000, 9001];
 
 /** FastCGI is the default for PHP/Laravel sites; mod_php only when chosen explicitly. */
 export const usesFcgi = (cfg) => cfg.type !== 'proxy' && cfg.phpMode !== 'module';
@@ -152,18 +152,57 @@ export function parseLegacyVhost(text, serverName, sitePath) {
 }
 
 /** Site type from project files (`facts` are booleans plus package.json text). */
+/**
+ * Dev-server port the project itself declares: `--port N` in the `dev` script of
+ * package.json, else `server.port` in vite.config. Null when it relies on Vite's default.
+ */
+export function declaredVitePort(facts) {
+    let pkg = null;
+    try { pkg = facts.packageJson ? JSON.parse(facts.packageJson) : null; } catch { /* invalid package.json */ }
+    const script = pkg?.scripts?.dev || pkg?.scripts?.serve || '';
+    const fromScript = script.match(/--port[=\s]+(\d{2,5})/);
+    if (fromScript) return parseInt(fromScript[1], 10);
+    return serverPortInViteConfig(facts.viteConfig || '');
+}
+
+/** `port` directly inside the `server: { ... }` object (not hmr.port, not preview.port). */
+function serverPortInViteConfig(text) {
+    for (const m of text.matchAll(/\bserver\s*:\s*\{/g)) {
+        let depth = 1;
+        let i = m.index + m[0].length;
+        const start = i;
+        for (; i < text.length && depth > 0; i++) {
+            if (text[i] === '{') depth++;
+            else if (text[i] === '}') depth--;
+        }
+        // Blank out nested objects so only top-level keys of `server` remain.
+        let body = text.slice(start, i - 1);
+        let prev;
+        do { prev = body; body = body.replace(/\{[^{}]*\}/g, '{}'); } while (body !== prev);
+        const port = body.match(/(?:^|[,{\s])port\s*:\s*(\d{2,5})/);
+        if (port) return parseInt(port[1], 10);
+    }
+    return null;
+}
+
 export function detectFromFiles(facts, usedPorts = []) {
     if (facts.srcPublicIndex) return { type: 'laravel', docRoot: 'src/public' };
     if (facts.publicIndex && facts.artisan) return { type: 'laravel', docRoot: 'public' };
     let pkg = null;
     try { pkg = facts.packageJson ? JSON.parse(facts.packageJson) : null; } catch { /* invalid package.json */ }
     if (pkg && (pkg.dependencies?.vite || pkg.devDependencies?.vite)) {
+        const declared = declaredVitePort(facts);
+        if (declared) return { type: 'proxy', proxyPort: declared };
         let port = DEFAULT_VITE_PORT;
         while (usedPorts.includes(port)) port++;
         return { type: 'proxy', proxyPort: port };
     }
     return { type: 'php', docRoot: '' };
 }
+
+/** Ports hand-written (unmanaged) vhosts proxy to, so a new project does not reuse them. */
+export const proxyPortsInVhosts = (text) =>
+    [...(text || '').matchAll(/^\s*ProxyPass\s+\S+\s+https?:\/\/(?:127\.0\.0\.1|localhost):(\d+)/gim)].map(m => parseInt(m[1], 10));
 
 export function defaultSiteConfig(folder) {
     return {

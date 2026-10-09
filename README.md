@@ -69,7 +69,9 @@ It focuses on:
 ## Main Sections
 
 - `Services`: start, stop, monitor, and auto-start managed services
+- `Guide`: first-run checklist with live checks and one-click fixes, step-by-step recipes, troubleshooting
 - `Sites`: create and manage local virtual hosts and project folders
+- `Domains`: domains, aliases, HTTPS (mkcert) and the hosts file; import / export a project's `devstack.json`
 - `Apache`: install and switch Apache builds
 - `Database`: manage MySQL versions and run quick queries
 - `PHP`: install, switch, and patch PHP runtimes
@@ -80,9 +82,20 @@ It focuses on:
 ## Quick Start
 
 - Download the latest packaged build from [Releases](https://github.com/holdon1996/dev-stack/releases/latest)
-- Run the `.exe` or `.msi` installer
-- Launch DevStack
-- Open `Settings` and configure your paths, ports, and local services
+- Run the `.exe` installer and install into a short folder without spaces, for example `C:\devstack`. That folder holds the binaries (`bin`) and your projects (`www`); avoid `Program Files` and `AppData`.
+- Launch DevStack (it asks for Administrator rights: needed for the hosts file, HTTPS certificates and stopping services)
+- Open the `Guide` page and fix every red item of the checklist (Apache, PHP, MySQL, Visual C++ runtime, ports, HTTPS CA). Each row has a Fix button.
+- Follow a recipe from the Guide: multi-repo Laravel + Vue project, Vite frontend, webhooks through a Cloudflare tunnel, database import
+
+## Team Setup With `devstack.json`
+
+A project can ship its DevStack site settings in a `devstack.json` (domains, HTTPS, Vite ports, PHP FastCGI pool size, groups, queue / scheduler processes). Put it in the workspace next to the repositories (it is found up to two folder levels below `www`).
+
+- Teammates clone the repositories into `www`, open `Domains` > `Project config` and press `Import`: every listed project is configured in one apply. The confirmation lists the processes the file defines before anything is saved.
+- After changing site settings, use `Export devstack.json` and commit the file.
+- Machine-specific values (FastCGI port blocks, install paths) are never written to the file.
+
+When something fails, `logs/devstack-app.log` in the DevStack folder keeps the app errors; send it with the Apache tab of the `Logs` page when asking for help.
 
 ## Screenshots
 

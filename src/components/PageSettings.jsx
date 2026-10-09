@@ -75,7 +75,8 @@ const PageSettings = () => {
       const serverRoot = `${dsDir}/bin/apache/apache-${activeApache.version}`;
       invoke('patch_apache_paths', {
         newServerRoot: serverRoot,
-        newDocRoot: docRoot
+        newDocRoot: docRoot,
+        port: parseInt(settings.port80) || 80,
       }).then((path) => {
         showToast(`✓ Apache config synced: ${path}`, 'ok');
       }).catch(err => {

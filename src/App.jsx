@@ -12,6 +12,7 @@ import PageQuickConfig from './components/PageQuickConfig';
 import PageApache from './components/PageApache';
 import PageNode from './components/PageNode';
 import PageMailServer from './components/PageMailServer';
+import PageGuide from './components/PageGuide';
 import PageDomains from './components/PageDomains';
 import Toast from './components/Toast';
 import Modal from './components/Modal';
@@ -24,7 +25,7 @@ import { useSystemStats } from './hooks/useSystemStats';
 const appWindow = getCurrentWindow();
 
 function App() {
-  const { activePage, initApp, killAllChildProcesses, addServiceLog, checkAppUpdate } = useStore();
+  const { activePage, initApp, recordAppIssue, checkAppUpdate } = useStore();
 
   useServicePoll();
   useSystemStats();
@@ -34,25 +35,26 @@ function App() {
     checkAppUpdate(true);
   }, []);
 
-  // Global error handler — pipes all JS errors to Nhật ký tab (visible in built app without DevTools)
+  // Global error handler: JS errors go to the Logs tab and logs/devstack-app.log (the built app has no DevTools).
   useEffect(() => {
+    const fmt = (args) => args.map(a => a instanceof Error ? (a.stack || a.message) : typeof a === 'object' ? JSON.stringify(a) : a).join(' ');
     const handleError = (msg, src, line, col, err) => {
       const detail = err?.stack || `${msg} (${src}:${line}:${col})`;
-      addServiceLog('apache', `[JS Error] ${detail}`, 'err');
+      recordAppIssue(`[JS Error] ${detail}`, 'err');
     };
     const handleRejection = (e) => {
       const detail = e.reason?.stack || e.reason?.message || String(e.reason);
-      addServiceLog('apache', `[Unhandled Promise] ${detail}`, 'err');
+      recordAppIssue(`[Unhandled Promise] ${detail}`, 'err');
     };
     const origError = console.error.bind(console);
     const origWarn = console.warn.bind(console);
     console.error = (...args) => {
       origError(...args);
-      addServiceLog('apache', `[console.error] ${args.map(a => typeof a === 'object' ? JSON.stringify(a) : a).join(' ')}`, 'err');
+      recordAppIssue(`[console.error] ${fmt(args)}`, 'err');
     };
     console.warn = (...args) => {
       origWarn(...args);
-      addServiceLog('apache', `[console.warn] ${args.map(a => typeof a === 'object' ? JSON.stringify(a) : a).join(' ')}`, 'warn');
+      recordAppIssue(`[console.warn] ${fmt(args)}`, 'warn');
     };
     window.onerror = handleError;
     window.onunhandledrejection = handleRejection;
@@ -62,12 +64,10 @@ function App() {
       console.error = origError;
       console.warn = origWarn;
     };
-  }, [addServiceLog]);
+  }, [recordAppIssue]);
 
-  const handleClose = async () => {
-    await killAllChildProcesses();
-    await appWindow.close();
-  };
+  // The Rust CloseRequested handler stops DevStack's own processes (also on Alt+F4).
+  const handleClose = async () => { await appWindow.close(); };
   const handleMinimize = async () => { await appWindow.minimize(); };
   const handleMaximize = async () => {
     await appWindow.toggleMaximize();
@@ -108,6 +108,7 @@ function App() {
 
         <main className="flex-1 min-h-0 flex flex-col bg-[#13151a] overflow-hidden">
           {activePage === 'services' && <PageServices />}
+          {activePage === 'guide' && <PageGuide />}
           {activePage === 'sites' && <PageSites />}
           {activePage === 'domains' && <PageDomains />}
           {activePage === 'database' && <PageDatabase />}

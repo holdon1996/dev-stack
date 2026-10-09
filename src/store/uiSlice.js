@@ -1,5 +1,7 @@
 import translations from '../i18n';
 
+let toastTimer = null;
+
 export const createUiSlice = (set, get) => ({
     activePage: 'services',
     startTime: Date.now(),
@@ -36,11 +38,15 @@ export const createUiSlice = (set, get) => ({
         set({ activePage: page });
     },
 
-    showToast: (msg, type = 'ok') => {
-        set({ toast: { show: true, msg, type } });
-        setTimeout(() => {
+    /** `action`: optional `{ label, page }` or `{ label, guide: '<anchor>' }` button (e.g. "How to fix"). */
+    showToast: (msg, type = 'ok', { action } = {}) => {
+        // A newer toast must not be hidden by the previous toast's timer.
+        clearTimeout(toastTimer);
+        set({ toast: { show: true, msg, type, action } });
+        if (type === 'danger') get().recordAppIssue?.(`[toast] ${msg}`, 'err', { fileOnly: true });
+        toastTimer = setTimeout(() => {
             set({ toast: { show: false, msg: '', type: 'ok' } });
-        }, 5000);
+        }, type === 'danger' || action ? 9000 : 5000);
     },
 
     setDownloading: (val) => set({ isDownloading: val }),
@@ -224,7 +230,7 @@ export const createUiSlice = (set, get) => ({
         let text = translations[locale]?.[key] || translations.en[key] || key;
         if (params) {
             Object.entries(params).forEach(([k, v]) => {
-                text = text.replace(`{${k}}`, v);
+                text = text.split(`{${k}}`).join(v ?? '');
             });
         }
         return text;

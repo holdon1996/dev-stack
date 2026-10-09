@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import HelpTip from './HelpTip';
 import { useStore } from '../store';
 import { Copy, Play, Square, Download, Check, Loader, ExternalLink, Radio, Trash2, AlertTriangle } from 'lucide-react';
 import CloudflareTunnelMode, { getDefaultTunnelName } from './CloudflareTunnelMode';
@@ -28,7 +29,7 @@ const PageTunnels = () => {
     tunnelProvider, tunnelStatus, tunnelPublicUrl, tunnelPort, tunnelProtocol,
     tunnelLogs, tunnelInstalled, tunnelHostHeader, sites, tunnelInstallProgress,
     tunnelMode, tunnelCustomDomain, tunnelCustomName, cloudflareAuthStatus,
-    setTunnelProvider, setTunnelPort, setTunnelProtocol, setTunnelHostHeader, setTunnelCustomName,
+    setTunnelProvider, setTunnelPort, setTunnelProtocol, setTunnelSite, setTunnelCustomName, tunnelSiteKey,
     startTunnel, stopTunnel, installTunnelBinary, clearTunnelLogs, showToast, t, checkTunnelsInstalled,
     siteConfigs, tunnelRoutes, setTunnelCustomDomain, tunnelProbePath, setTunnelProbePath
   } = useStore();
@@ -64,14 +65,16 @@ const PageTunnels = () => {
       && cloudflareAuthStatus === 'connected'
   );
 
-  const selectedSite = sites.find(site => site.domain === tunnelHostHeader);
+  const selectedSite = sites.find(site => site.key === tunnelSiteKey) || sites.find(site => site.domain === tunnelHostHeader);
+  // Saved before the project was renamed or taken over: the old host no longer has a vhost.
+  const staleHostHeader = tunnelHostHeader && !selectedSite ? tunnelHostHeader : '';
   const exposesViteSource = siteConfigs[selectedSite?.key]?.type === 'proxy';
   const originUrl = tunnelProtocol === 'tcp' ? `tcp://localhost:${tunnelPort}` : `${tunnelPort === 443 ? 'https' : 'http'}://localhost:${tunnelPort}`;
 
-  const selectProject = (domain) => {
-    setTunnelHostHeader(domain);
+  const selectProject = (key) => {
+    setTunnelSite(key);
     if (isCustomCloudflare) {
-      const site = sites.find(s => s.domain === domain);
+      const site = sites.find(s => s.key === key);
       const route = tunnelRoutes.find(r => r.siteKey === site?.key);
       setTunnelCustomName(route?.tunnelName || getDefaultTunnelName(site));
       if (route) {
@@ -168,19 +171,30 @@ const PageTunnels = () => {
           <div className="mb-5 flex flex-col gap-1.5">
             <label className="text-[12px] font-semibold text-textDim flex items-center gap-1.5">
               {t(isCustomCloudflare ? 'customDomainProject' : 'pointToProject')}
+              <HelpTip textKey="help_tunnelProject" anchor="recipe-tunnel" />
               <span className="text-[10px] text-muted font-normal">{t('serveVhostDesc')}</span>
             </label>
             <select
               className="select-field"
-              value={tunnelHostHeader}
+              value={selectedSite?.key || ''}
               onChange={(e) => selectProject(e.target.value)}
               disabled={tunnelStatus !== 'stopped'}
             >
               <option value="">{t('noVhostSelected')}</option>
               {(sites || []).map(site => (
-                <option key={site.id} value={site.domain}>{site.domain} → {site.path}</option>
+                <option key={site.id} value={site.key}>{site.domain} → {site.path}</option>
               ))}
             </select>
+            {staleHostHeader && (
+              <div className="flex items-start gap-2 text-[11px] text-warn mt-1">
+                <AlertTriangle size={13} className="shrink-0 mt-0.5" /> {t('tunnelStaleHost', { host: staleHostHeader })}
+              </div>
+            )}
+            {selectedSite && siteConfigs[selectedSite.key]?.httpsRedirect && tunnelPort !== 443 && (
+              <div className="flex items-start gap-2 text-[11px] text-warn mt-1">
+                <AlertTriangle size={13} className="shrink-0 mt-0.5" /> {t('tunnelHttpsRedirectWarn')}
+              </div>
+            )}
             {exposesViteSource && (
               <div className="flex items-start gap-2 text-[11px] text-warn mt-1">
                 <AlertTriangle size={13} className="shrink-0 mt-0.5" /> {t('viteSourceExposedWarn')}

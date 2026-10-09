@@ -1,4 +1,4 @@
-import { getApacheDir, getMailpitExe, getMysqlDir, getRedisDir } from '../lib/paths';
+import { getApacheDir, getMailpitExe, getMysqlDir } from '../lib/paths';
 
 const getVersionFromServicePath = (path, prefix) => {
     const normalized = (path || '').replace(/\\/g, '/');
@@ -94,15 +94,40 @@ export const createServiceSlice = (set, get) => ({
         }
     },
 
+    /** Whether a service has binaries to start; Start All skips the rest instead of warning about each. */
+    _serviceInstalled: async (svc) => {
+        const { invoke } = await import('@tauri-apps/api/core');
+        switch (svc.type) {
+            case 'web': return get().apacheVersions.some(v => v.installed);
+            case 'db': return get().mysqlVersions.some(v => v.installed);
+            case 'cache': return !!(await get().resolveRedis());
+            case 'mail': return invoke('path_exists', { path: getMailpitExe(get()) }).catch(() => false);
+            case 'storage': return invoke('path_exists', { path: get().minioPaths().exe }).catch(() => false);
+            default: return true;
+        }
+    },
+
     startAll: async () => {
         for (const svc of get().services) {
-            if (svc.type !== 'php' && svc.status !== 'running') await get().toggleService(svc.id);
+            if (svc.type === 'php' || svc.status === 'running') continue;
+            if (!(await get()._serviceInstalled(svc))) continue;
+            await get().toggleService(svc.id);
         }
     },
     stopAll: async () => {
         for (const svc of get().services) {
             if (svc.type !== 'php' && svc.status === 'running') await get().toggleService(svc.id, 'stop');
         }
+    },
+
+    /** App-level error/warning: shown in the Apache log tab and kept in logs/devstack-app.log. */
+    recordAppIssue: (text, level = 'err', { fileOnly = false } = {}) => {
+        if (!fileOnly) get().addServiceLog('apache', text, level);
+        const d = new Date();
+        const stamp = `${d.toLocaleDateString('sv-SE')} ${d.toLocaleTimeString('sv-SE')}`;
+        import('@tauri-apps/api/core')
+            .then(({ invoke }) => invoke('append_app_log', { line: `${stamp} [${level}] ${text}` }))
+            .catch(() => {});
     },
 
     addServiceLog: (type, m, l = 'info') => set(s => ({
@@ -153,7 +178,7 @@ export const createServiceSlice = (set, get) => ({
                                 status: isApacheRunning ? 'running' : 'stopped',
                                 pid: isApacheRunning ? 'Apache' : null,
                                 memory: '—',
-                                path: 'Module of Apache',
+                                path: get()._sitesWithFcgi().some(s => s.fcgi) ? get().t('phpRunsFcgi') : get().t('phpRunsModule'),
                                 portConflict: conflicts[i]
                             };
                         }
@@ -294,7 +319,7 @@ export const createServiceSlice = (set, get) => ({
         if (!svc) return;
 
         if (svc.type === 'php') {
-            get().showToast('PHP runs inside Apache. Please Start/Stop Apache instead.', 'info');
+            get().showToast(get().t('phpFollowsApache'), 'info');
             return;
         }
 
@@ -443,6 +468,7 @@ export const createServiceSlice = (set, get) => ({
     updateServicePort: async (id, port) => {
         const intPort = parseInt(port) || 0;
         const { invoke } = await import('@tauri-apps/api/core');
+        const oldPort = parseInt(get().services.find(s => s.id === id)?.port) || 0;
 
         set(s => ({
             services: s.services.map(sv => sv.id === id ? { ...sv, port: intPort } : sv)
@@ -450,6 +476,11 @@ export const createServiceSlice = (set, get) => ({
 
         const svc = get().services.find(s => s.id === id);
         if (svc?.type === 'web') get().updateSettings({ port80: intPort });
+        if (svc?.type === 'web' && intPort !== oldPort) {
+            // Vhosts (*:port) and httpd.conf `Listen` both follow the new port.
+            if (get()._managedSites().length) await get().applySites({ restart: false });
+            if (svc.status === 'running') await get().restartApache();
+        }
         if (svc?.type === 'db') {
             get().updateSettings({ portMySQL: intPort });
             // Sync with my.ini
@@ -525,6 +556,10 @@ export const createServiceSlice = (set, get) => ({
         } catch (e) {
             console.error('install path initialization failed:', e);
         }
+        // Process kills (stop, close, quit) only touch binaries inside this folder.
+        await import('@tauri-apps/api/core')
+            .then(({ invoke }) => invoke('set_devstack_dir', { dir: get().settings.devStackDir || '' }))
+            .catch(e => console.error('set_devstack_dir failed:', e));
 
         // Sync persisted ports to services
         const s = get().settings;
@@ -547,8 +582,10 @@ export const createServiceSlice = (set, get) => ({
         await get().scanInstalledPhp();
         await get().scanInstalledMysql();
         await get().scanInstalledNode?.();
+        await get().resolveRedis();
         await get().scanSites();
         await get().initProcesses();
+        await get()._adoptFcgiPoolsAfterRestart();
         await get().ensurePhpCaConfig();
         get().loadHostsFile();
 
@@ -561,25 +598,15 @@ export const createServiceSlice = (set, get) => ({
         const autoMap = get().settings.autoStartMap || {};
         get().services.forEach(svc => {
             if (svc.type !== 'php' && autoMap[svc.id] === true && svc.status !== 'running') {
-                if (svc.portConflict?.inUse) return; // Prevent infinite spinning
+                if (svc.portConflict) return; // Prevent infinite spinning
                 if (svc.type === 'mail' && !mailpitInstalled) return; // nothing to start; no toast at launch
                 get().toggleService(svc.id);
             }
         });
 
         get().showToast('DevStack ready', 'ok');
+        get().runGuideChecks();
         get().fetchServiceLogs('apache');
-    },
-
-    killAllChildProcesses: async () => {
-        try {
-            const { invoke } = await import('@tauri-apps/api/core');
-            await invoke('proc_stop_all');
-            const processes = ['httpd.exe', 'mysqld.exe', 'redis-server.exe', 'php-cgi.exe', 'php.exe', 'mailpit.exe', 'minio.exe'];
-            await Promise.all(processes.map(name => invoke('kill_process_by_name_exact', { name })));
-        } catch (e) {
-            console.error('Failed to kill processes natively', e);
-        }
     },
 
     openTerminal: async (prjPath, shell = 'cmd') => {
@@ -692,6 +719,10 @@ export const createServiceSlice = (set, get) => ({
     streamServiceLogs: async (type) => {
         const { _activeListeners, addServiceLog } = get();
         if (_activeListeners[type]) return;
+        // Claim the slot before any await: the Logs page and switchLog both call this.
+        const claim = () => {};
+        set(s => ({ _activeListeners: { ...s._activeListeners, [type]: claim } }));
+        let streaming = false;
 
         try {
             const { invoke } = await import('@tauri-apps/api/core');
@@ -743,16 +774,36 @@ export const createServiceSlice = (set, get) => ({
                     addServiceLog(type, `[File] ${event.payload}`, event.payload.toLowerCase().includes('error') ? 'err' : 'info');
                 });
 
-                await invoke('stream_log_file', {
+                // The generation lets a late stop end only this stream, never a newer one.
+                const generation = await invoke('stream_log_file', {
                     eventName,
                     path: normalizedPath
                 });
+                const stop = () => {
+                    unlisten();
+                    invoke('stop_log_stream', { eventName, generation }).catch(() => {});
+                };
 
-                set(s => ({ _activeListeners: { ...s._activeListeners, [type]: unlisten } }));
+                if (get()._activeListeners[type] !== claim) {
+                    // Streaming was stopped while this was starting.
+                    stop();
+                    return;
+                }
+                set(s => ({ _activeListeners: { ...s._activeListeners, [type]: stop } }));
+                streaming = true;
             }
         } catch (e) {
             console.error(`Stream ${type} failed`, e);
             addServiceLog(type, `Streaming failed: ${e.message || e}`, 'err');
+        } finally {
+            // No stream started (no log file yet, no active version, error): free the slot
+            // so the next tab switch tries again.
+            if (!streaming && get()._activeListeners[type] === claim) {
+                set(s => {
+                    const { [type]: _claim, ...rest } = s._activeListeners;
+                    return { _activeListeners: rest };
+                });
+            }
         }
     },
 

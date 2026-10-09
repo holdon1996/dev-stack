@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useStore } from '../store';
-import { Play, Pause, RotateCcw, Globe, Database, Cpu, Zap, Loader, Power, Mail, HardDrive, ExternalLink, Terminal, Plus, Download } from 'lucide-react';
+import { Play, Pause, RotateCcw, Globe, Database, Cpu, Zap, Loader, Power, Mail, HardDrive, ExternalLink, Terminal, Plus, Download, LifeBuoy, X } from 'lucide-react';
 import { ConfigStaleBadge } from './PageSites';
 
 const openUrl = async (url) => {
@@ -219,7 +219,7 @@ const MinioPanel = () => {
         <HardDrive size={15} className="text-accent" />
         <span className="text-[13px] font-bold flex-1">MinIO (S3)</span>
         {!installed && (
-          <button type="button" className="btn-primary text-[11px] py-1 px-2.5 flex items-center gap-1" onClick={async () => { await installMinio(); setInstalled(true); }}>
+          <button type="button" className="btn-primary text-[11px] py-1 px-2.5 flex items-center gap-1" onClick={async () => setInstalled(await installMinio())}>
             <Download size={12} /> {t('install')}
           </button>
         )}
@@ -269,6 +269,26 @@ const FcgiPools = () => {
           </div>
         ))}
       </div>
+    </div>
+  );
+};
+
+/** Shown until the first-run checklist passes (or the user hides it): the way into the Guide. */
+const FirstRunBanner = () => {
+  const { guideChecks, guideDismissed, runGuideChecks, openGuide, dismissGuideBanner, t } = useStore();
+  // initApp runs the first check once versions are scanned; later visits refresh it.
+  React.useEffect(() => { if (!guideDismissed && useStore.getState().guideChecks.length) runGuideChecks(); }, []);
+  const failing = guideChecks.filter(c => c.status === 'fail');
+  if (guideDismissed || !failing.length) return null;
+  return (
+    <div className="mb-5 bg-surface border border-warn/40 rounded-xl px-4 py-3 flex items-center gap-3">
+      <LifeBuoy size={18} className="text-warn shrink-0" />
+      <div className="flex-1 text-[12px]">
+        <div className="font-bold">{t('guideBannerTitle', { count: failing.length })}</div>
+        <div className="text-muted mt-0.5">{failing.map(c => t(`guideCheck_${c.id}`)).join(' · ')}</div>
+      </div>
+      <button type="button" className="btn-primary text-[12px] py-1.5 px-3" onClick={() => openGuide('checklist')}>{t('guideBannerOpen')}</button>
+      <button type="button" className="btn-ghost p-1.5" onClick={dismissGuideBanner} aria-label={t('guideBannerHide')} title={t('guideBannerHide')}><X size={14} /></button>
     </div>
   );
 };
@@ -329,6 +349,7 @@ const PageServices = () => {
       </div>
 
       <div className="flex-1 overflow-y-auto p-6 scroll-smooth">
+        <FirstRunBanner />
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
           <StatCard title={t('cpuUsage')} value={`${cpu}%`} color="text-accent" />
           <StatCard title={t('usedRam')} value={`${ram} GB`} color="text-info" />

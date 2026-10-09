@@ -94,6 +94,8 @@ export const createConfigSlice = (set, get) => ({
             stopAll().finally(async () => {
                 try {
                     const { invoke } = await import('@tauri-apps/api/core');
+                    // Services of the old folder are stopped; kills now target the new folder.
+                    if (key === 'devStackDir') await invoke('set_devstack_dir', { dir: value });
                     const { scanInstalledApache, scanInstalledMysql, apacheVersions, mysqlVersions } = get();
 
                     // 2. Scan new directory for installed binaries
@@ -109,7 +111,7 @@ export const createConfigSlice = (set, get) => ({
                     if (activeApache) {
                         const serverRoot = `${dsDir}/bin/apache/apache-${activeApache.version}`;
                         addServiceLog('apache', `🛠 Đang đồng bộ Apache config tại ${serverRoot}...`, 'info');
-                        await invoke('patch_apache_paths', { newServerRoot: serverRoot, newDocRoot: docRoot });
+                        await invoke('patch_apache_paths', { newServerRoot: serverRoot, newDocRoot: docRoot, port: parseInt(get().settings.port80) || 80 });
                     }
 
                     // 4. Patch MySQL Config (basedir/datadir)
@@ -208,8 +210,7 @@ export const createConfigSlice = (set, get) => ({
                 const act = get().phpVersions.find(p => p.active && p.installed);
                 if (act) path = `${devDir}/bin/php/php-${act.version}/php.ini`;
             } else if (id === 'redis_conf') {
-                const activeRedis = get().redisVersions?.find(v => v.active);
-                if (activeRedis) path = `${devDir}/bin/redis/redis-${activeRedis.version}/redis.conf`;
+                if (get().redisDir) path = `${get().redisDir}/redis.conf`;
             } else if (id === 'env') {
                 path = `${devDir}/.env`;
             }

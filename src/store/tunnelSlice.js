@@ -10,6 +10,8 @@ export const createTunnelSlice = (set, get) => ({
     tunnelLogs: [],
     tunnelInstallProgress: { pct: 0, downloaded: 0, total: 0 },
     tunnelHostHeader: '',
+    /** Project the tunnel serves; its current domain is looked up at start, so a renamed domain is followed. */
+    tunnelSiteKey: '',
     tunnelMode: 'quick',
     tunnelCustomDomain: '',
     tunnelCustomName: '',
@@ -22,6 +24,12 @@ export const createTunnelSlice = (set, get) => ({
     setTunnelPort: (p) => set({ tunnelPort: parseInt(p) || 80 }),
     setTunnelProtocol: (p) => set({ tunnelProtocol: p }),
     setTunnelHostHeader: (h) => set({ tunnelHostHeader: h }),
+    setTunnelSite: (key) => {
+        const site = get().sites.find(s => s.key === key);
+        set({ tunnelSiteKey: key, tunnelHostHeader: site?.domain || '' });
+        // A site that redirects HTTP to HTTPS answers 301 on port 80 (webhooks fail): use its 443 vhost.
+        if (get().siteConfigs[key]?.httpsRedirect && get().tunnelProtocol !== 'tcp') set({ tunnelPort: 443 });
+    },
     setTunnelMode: (mode) => set({ tunnelMode: mode }),
     setTunnelCustomDomain: (domain) => set({ tunnelCustomDomain: domain }),
     setTunnelCustomName: (name) => set({ tunnelCustomName: name }),
@@ -151,7 +159,9 @@ export const createTunnelSlice = (set, get) => ({
 
         await get().stopTunnel();
 
-        const hostHeader = tunnelHostHeader || '';
+        // Follow the project's current domain; a stored domain goes stale when the site is renamed.
+        const hostHeader = sites.find(s => s.key === get().tunnelSiteKey)?.domain || tunnelHostHeader || '';
+        if (hostHeader !== tunnelHostHeader) set({ tunnelHostHeader: hostHeader });
         const isCustomCloudflare = tunnelProvider === 'cloudflare' && tunnelMode === 'custom';
         if (isCustomCloudflare && (!hostHeader || !tunnelCustomDomain.trim() || !tunnelCustomName.trim())) {
             get().addTunnelLog('Select a project, tunnel name, and custom domain first.', 'warn');
@@ -237,7 +247,9 @@ export const createTunnelSlice = (set, get) => ({
                     // One named tunnel serves every hostname assigned to it; each keeps its own host header.
                     const tunnelName = tunnelCustomName.trim();
                     const routes = [
-                        ...get().tunnelRoutes.filter(r => r.hostname !== hostname),
+                        ...get().tunnelRoutes
+                            .filter(r => r.hostname !== hostname)
+                            .map(r => ({ ...r, hostHeader: sites.find(s => s.key === r.siteKey)?.domain || r.hostHeader })),
                         { hostname, tunnelName, siteKey, hostHeader, port: tunnelPort },
                     ];
                     const prepared = await invoke('prepare_cloudflare_tunnel', {

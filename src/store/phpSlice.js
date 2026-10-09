@@ -254,10 +254,12 @@ export const createPhpSlice = (set, get) => ({
                 expectedSizeMb: v?.sizeMb || null
             });
 
-            if (result === "SUCCESS") {
-                set(s => ({ phpVersions: s.phpVersions.map(pv => pv.version === version ? { ...pv, installed: true, installing: false } : pv) }));
-                get().showToast(`PHP ${version} installed`, 'ok');
-            }
+            if (result !== "SUCCESS") throw result;
+            set(s => ({ phpVersions: s.phpVersions.map(pv => pv.version === version ? { ...pv, installed: true, installing: false } : pv) }));
+            get().showToast(`PHP ${version} installed`, 'ok');
+            // Without the CA block, curl in the new PHP fails (error 60) until the next app start.
+            await get().ensurePhpCaConfig();
+            if (!get().phpVersions.some(pv => pv.active && pv.installed)) await get().setActivePhp(version);
         } catch (e) {
             console.error('installPhpVersion error:', e);
             set(s => ({
@@ -322,6 +324,7 @@ export const createPhpSlice = (set, get) => ({
                 }));
                 await get().scanInstalledPhp();
                 get().showToast(`Custom PHP ${version} installed`, 'ok');
+                await get().ensurePhpCaConfig();
             } else {
                 set(s => ({ phpVersions: s.phpVersions.map(pv => pv.version === version ? { ...pv, installing: false } : pv) }));
             }
@@ -392,8 +395,11 @@ export const createPhpSlice = (set, get) => ({
         if (activeApache) {
             get().addServiceLog?.('php', `Rebinding Apache ${activeApache.version} to PHP ${version}...`, 'info');
             await get().configureApachePhp(version, activeApache.version);
-            get().addServiceLog?.('php', `Restarting Apache to load PHP ${version}...`, 'warn');
-            await get().restartApache();
+            const web = get().services.find(s => s.type === 'web');
+            if (web?.status === 'running' || web?.pid) {
+                get().addServiceLog?.('php', `Restarting Apache to load PHP ${version}...`, 'warn');
+                await get().restartApache();
+            }
         }
 
         set({ activatingPhp: null });

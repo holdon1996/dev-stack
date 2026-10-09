@@ -46,6 +46,7 @@ struct AppState {
     last_stats_refresh: AtomicU64,
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     pending_update: Mutex<Option<TauriPendingUpdate>>,
+    devstack_dir: Mutex<Option<String>>,
 }
 
 #[derive(Debug)]
@@ -127,6 +128,21 @@ fn is_app_elevated() -> bool {
     {
         false
     }
+}
+
+/// Visual C++ 2015-2022 x64 runtime, needed by the Apache (VS17/VS18) and MySQL builds;
+/// without it httpd.exe exits at once and Start only reports a timeout.
+#[tauri::command]
+fn vc_runtime_installed() -> bool {
+    use winreg::enums::{HKEY_LOCAL_MACHINE, KEY_READ, KEY_WOW64_32KEY, KEY_WOW64_64KEY};
+    use winreg::RegKey;
+    let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
+    [KEY_WOW64_64KEY, KEY_WOW64_32KEY].iter().any(|view| {
+        hklm.open_subkey_with_flags(r"SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\x64", KEY_READ | view)
+            .and_then(|key| key.get_value::<u32, _>("Installed"))
+            .map(|v| v == 1)
+            .unwrap_or(false)
+    })
 }
 
 #[tauri::command]
@@ -271,12 +287,13 @@ fn has_utf8_bom(bytes: &[u8]) -> bool {
     bytes.starts_with(&[0xEF, 0xBB, 0xBF])
 }
 
-fn strip_utf8_bom(bytes: &[u8]) -> &[u8] {
-    if has_utf8_bom(bytes) {
-        &bytes[3..]
-    } else {
-        bytes
+/// Strips every leading UTF-8 BOM: editors and older builds stacked several onto
+/// the hosts file, and a BOM glued to the first entry makes Windows ignore that line.
+fn strip_utf8_bom(mut bytes: &[u8]) -> &[u8] {
+    while has_utf8_bom(bytes) {
+        bytes = &bytes[3..];
     }
+    bytes
 }
 
 #[tauri::command]
@@ -796,6 +813,9 @@ async fn install_app_update(app: tauri::AppHandle, state: tauri::State<'_, AppSt
                                 "event": "Finished"
                             }),
                         );
+                        // On Windows the plugin runs the installer and exits the process itself,
+                        // so DevStack's services must be stopped now or they are left unsupervised.
+                        stop_devstack_processes(&app);
                     },
                 )
                 .await
@@ -838,6 +858,7 @@ async fn install_app_update(app: tauri::AppHandle, state: tauri::State<'_, AppSt
             );
 
             launch_downloaded_update_installer(&installer_path)?;
+            stop_devstack_processes(&app);
             app.exit(0);
             return Ok(());
         }
@@ -893,26 +914,91 @@ fn check_ports_status(ports: Vec<u16>) -> Vec<bool> {
 
 #[tauri::command]
 fn kill_process_by_name(state: tauri::State<'_, AppState>, name: String) -> bool {
-    kill_process_by_name_exact(state, name)
+    kill_process_by_name_exact(state, name, None)
 }
 
-#[tauri::command]
-fn kill_process_by_name_exact(state: tauri::State<'_, AppState>, name: String) -> bool {
-    let mut sys = state.sys.lock().unwrap();
+/// Lower-case, backslash-separated directory prefix ending in `\`.
+fn dir_prefix(dir: &str) -> Option<String> {
+    let d = dir.trim().replace('/', "\\").to_lowercase();
+    let d = d.trim_end_matches('\\');
+    (!d.is_empty()).then(|| format!("{d}\\"))
+}
+
+/// Kills processes named `name` whose executable lives under `under_dir`.
+/// The app runs elevated, so a bare name match would also kill other tools'
+/// php.exe / httpd.exe / mysqld.exe; a process whose path cannot be read is spared.
+fn kill_by_name_under(sys: &mut System, name: &str, under_dir: Option<&str>) -> bool {
     sys.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
-    
     let target_name = name.to_lowercase();
+    let prefix = under_dir.and_then(dir_prefix);
     let mut any_killed = false;
-    for (_pid, process) in sys.processes() {
-        let p_name = process.name().to_str().unwrap_or("").to_lowercase();
-        // Since we're replacing taskkill /IM exact match, we do exact match (case insensitive)
-        if p_name == target_name {
-            if process.kill() {
-                any_killed = true;
+    for process in sys.processes().values() {
+        if process.name().to_str().unwrap_or("").to_lowercase() != target_name {
+            continue;
+        }
+        if let Some(prefix) = &prefix {
+            let exe = process.exe().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_default();
+            if !exe.starts_with(prefix.as_str()) {
+                continue;
             }
+        }
+        if process.kill() {
+            any_killed = true;
         }
     }
     any_killed
+}
+
+/// `under_dir` defaults to the DevStack folder; only binaries inside it are killed.
+/// With no folder known nothing is killed: a bare name match would hit other tools.
+#[tauri::command]
+fn kill_process_by_name_exact(state: tauri::State<'_, AppState>, name: String, under_dir: Option<String>) -> bool {
+    let dir = under_dir
+        .filter(|d| dir_prefix(d).is_some())
+        .or_else(|| state.devstack_dir.lock().unwrap().clone());
+    let Some(dir) = dir else { return false };
+    let mut sys = state.sys.lock().unwrap();
+    kill_by_name_under(&mut sys, &name, Some(&dir))
+}
+
+/// Appends a line to `<devstack>/logs/devstack-app.log` (kept under ~2 MB, one
+/// rotated copy), so teammates can send the app's errors when asking for help.
+#[tauri::command]
+fn append_app_log(state: tauri::State<'_, AppState>, line: String) {
+    let Some(dir) = state.devstack_dir.lock().unwrap().clone() else { return };
+    let logs = Path::new(&dir).join("logs");
+    let _ = fs::create_dir_all(&logs);
+    let path = logs.join("devstack-app.log");
+    if fs::metadata(&path).map(|m| m.len() > 2 * 1024 * 1024).unwrap_or(false) {
+        let _ = fs::rename(&path, logs.join("devstack-app.log.1"));
+    }
+    if let Ok(mut file) = fs::OpenOptions::new().create(true).append(true).open(&path) {
+        let _ = writeln!(file, "{}", line.replace('\n', "\n    "));
+    }
+}
+
+/// The DevStack folder from settings, used to scope process kills.
+#[tauri::command]
+fn set_devstack_dir(state: tauri::State<'_, AppState>, dir: String) {
+    // An empty value keeps the folder detected at startup (or set earlier).
+    if dir_prefix(&dir).is_some() {
+        *state.devstack_dir.lock().unwrap() = Some(dir);
+    }
+}
+
+const SERVICE_EXES: [&str; 7] = ["httpd.exe", "mysqld.exe", "redis-server.exe", "php-cgi.exe", "php.exe", "mailpit.exe", "minio.exe"];
+
+/// Stops the processes DevStack started (procman + service binaries inside the
+/// DevStack folder). Runs on window close and tray Quit, so Alt+F4 behaves the same.
+fn stop_devstack_processes(app: &tauri::AppHandle) {
+    proc_stop_all();
+    let state = app.state::<AppState>();
+    let dir = state.devstack_dir.lock().unwrap().clone();
+    let Some(dir) = dir else { return };
+    let mut sys = state.sys.lock().unwrap();
+    for name in SERVICE_EXES {
+        kill_by_name_under(&mut sys, name, Some(&dir));
+    }
 }
 
 /// PID of the process listening on `port` (IPv4), if any.
@@ -1153,6 +1239,37 @@ async fn spawn_command_stream(
 #[tauri::command]
 fn path_exists(path: String) -> bool {
     std::path::Path::new(&path).exists()
+}
+
+/// `redis-server.exe` under `<bin>/redis*` (the folder itself or one level down,
+/// as Windows zips usually nest a versioned folder). `bin/redis` wins, then the
+/// highest folder name (redis8 before redis5).
+#[tauri::command]
+fn find_redis_server(bin_dir: String) -> Option<String> {
+    let mut dirs: Vec<std::path::PathBuf> = fs::read_dir(&bin_dir).ok()?
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.is_dir() && p.file_name().is_some_and(|n| n.to_string_lossy().to_lowercase().starts_with("redis")))
+        .collect();
+    dirs.sort_by_key(|p| {
+        let name = p.file_name().unwrap().to_string_lossy().to_lowercase();
+        (name != "redis", std::cmp::Reverse(name))
+    });
+    for dir in dirs {
+        let direct = dir.join("redis-server.exe");
+        if direct.is_file() {
+            return Some(direct.to_string_lossy().into_owned());
+        }
+        if let Ok(entries) = fs::read_dir(&dir) {
+            for sub in entries.flatten().map(|e| e.path()).filter(|p| p.is_dir()) {
+                let nested = sub.join("redis-server.exe");
+                if nested.is_file() {
+                    return Some(nested.to_string_lossy().into_owned());
+                }
+            }
+        }
+    }
+    None
 }
 
 #[tauri::command]
@@ -2012,7 +2129,7 @@ fn write_text_file(path: String, content: String) -> Result<(), String> {
 
 /// Points httpd.conf at the current DevStack paths. Only targeted directives are
 /// rewritten; every other line (including hand edits) is preserved.
-fn patch_httpd_conf(raw: &str, sr: &str, dr: &str) -> String {
+fn patch_httpd_conf(raw: &str, sr: &str, dr: &str, port: u16) -> String {
     let mut content = raw.to_string();
 
     // Helper: normalizes path backslashes, used per-match only
@@ -2051,16 +2168,36 @@ fn patch_httpd_conf(raw: &str, sr: &str, dr: &str) -> String {
     // Enable rewrite/proxy/headers modules and the vhosts include that DevStack sites rely on.
     content = site_config::ensure_vhost_prereqs(&content);
 
+    // The HTTP port from Settings: the first non-443 `Listen` (443 belongs to the SITES block).
+    // No `$` anchor: `$` does not match before "\r\n", and eating the "\r" would mix line endings.
+    // Only the port changes: a bound address (`Listen 127.0.0.1:80`) is kept.
+    let re_listen = regex::Regex::new(r#"(?im)^Listen[ \t]+(?:[\d.]+:)?(\d+)\b"#).unwrap();
+    let port_range = re_listen
+        .captures_iter(&content)
+        .find(|c| &c[1] != "443")
+        .map(|c| c.get(1).unwrap().range());
+    if let Some(range) = port_range {
+        content.replace_range(range, &port.to_string());
+    }
+
     // Ensure a global ServerName exists so Apache does not warn on startup.
-    let re_server_name = regex::Regex::new(r#"(?im)^#?ServerName\s+.+$"#).unwrap();
-    if re_server_name.is_match(&content) {
-        content = re_server_name
-            .replace(&content, "ServerName localhost:80")
+    let server_name = format!("ServerName localhost:{port}");
+    // Every active ServerName (older builds left duplicates; Apache uses the last one),
+    // else the first commented one. Other commented lines stay commented.
+    let re_active_name = regex::Regex::new(r#"(?im)^ServerName[ \t]+[^\r\n]+"#).unwrap();
+    let re_server_name = regex::Regex::new(r#"(?im)^#?ServerName[ \t]+[^\r\n]+"#).unwrap();
+    if re_active_name.is_match(&content) {
+        content = re_active_name
+            .replace_all(&content, server_name.as_str())
             .to_string();
-    } else if let Some(listen_match) = regex::Regex::new(r#"(?im)^Listen\s+\d+\s*$"#).unwrap().find(&content) {
-        content.insert_str(listen_match.end(), "\r\nServerName localhost:80");
+    } else if re_server_name.is_match(&content) {
+        content = re_server_name
+            .replace(&content, server_name.as_str())
+            .to_string();
+    } else if let Some(listen_match) = regex::Regex::new(r#"(?im)^Listen[ \t]+\S+"#).unwrap().find(&content) {
+        content.insert_str(listen_match.end(), &format!("\r\n{server_name}"));
     } else {
-        content.push_str("\r\nServerName localhost:80\r\n");
+        content.push_str(&format!("\r\n{server_name}\r\n"));
     }
 
     // Replace: <Directory "DRIVE:..."> — handles both / and \ in paths
@@ -2107,7 +2244,7 @@ fn patch_httpd_conf(raw: &str, sr: &str, dr: &str) -> String {
 }
 
 #[tauri::command]
-fn patch_apache_paths(new_server_root: String, new_doc_root: String) -> Result<String, String> {
+fn patch_apache_paths(new_server_root: String, new_doc_root: String, port: Option<u16>) -> Result<String, String> {
     use std::fs;
     use std::path::Path;
 
@@ -2127,7 +2264,7 @@ fn patch_apache_paths(new_server_root: String, new_doc_root: String) -> Result<S
 
     // Read file as-is — do NOT do a global backslash replace, that corrupts LogFormat strings.
     let raw = fs::read_to_string(&conf_path).map_err(|e| e.to_string())?;
-    let content = patch_httpd_conf(&raw, &sr, &dr);
+    let content = patch_httpd_conf(&raw, &sr, &dr, port.unwrap_or(80));
     if content != raw {
         fs::write(&conf_path, &content).map_err(|e| e.to_string())?;
     }
@@ -3037,8 +3174,33 @@ fn read_file_tail(path: String, lines: usize) -> Result<String, String> {
     Ok(content[start..].join("\n"))
 }
 
+fn log_streams() -> &'static Mutex<std::collections::HashMap<String, u64>> {
+    static STREAMS: std::sync::OnceLock<Mutex<std::collections::HashMap<String, u64>>> = std::sync::OnceLock::new();
+    STREAMS.get_or_init(|| Mutex::new(std::collections::HashMap::new()))
+}
+
+/// Starts a new generation for `event_name`, ending any tail task of the previous one.
+fn bump_log_stream(event_name: &str) -> u64 {
+    let mut streams = log_streams().lock().unwrap();
+    let next = streams.get(event_name).copied().unwrap_or(0) + 1;
+    streams.insert(event_name.to_string(), next);
+    next
+}
+
+/// Ends the tail task of `event_name`. With `generation`, only when that stream is
+/// still the current one, so a late stop cannot end a newer stream.
 #[tauri::command]
-async fn stream_log_file(app: tauri::AppHandle, eventName: String, path: String) -> Result<(), String> {
+fn stop_log_stream(event_name: String, generation: Option<u64>) {
+    let mut streams = log_streams().lock().unwrap();
+    let current = streams.get(&event_name).copied().unwrap_or(0);
+    if generation.is_none_or(|g| g == current) {
+        streams.insert(event_name, current + 1);
+    }
+}
+
+/// Tails `path` from its end, emitting each new line as `eventName`. Returns the stream generation.
+#[tauri::command]
+async fn stream_log_file(app: tauri::AppHandle, eventName: String, path: String) -> Result<u64, String> {
     use tokio::io::{AsyncBufReadExt, AsyncSeekExt, BufReader};
     use tokio::fs::File;
     use std::path::Path;
@@ -3047,18 +3209,25 @@ async fn stream_log_file(app: tauri::AppHandle, eventName: String, path: String)
         return Err("File not found".into());
     }
 
+    // One tail task per event: a new stream (or stop_log_stream) bumps the
+    // generation and the previous task exits on its next tick.
+    let generation = bump_log_stream(&eventName);
+
     tokio::spawn(async move {
         let file = match File::open(&path).await {
             Ok(f) => f,
             Err(_) => return,
         };
-        
+
         let mut reader = BufReader::new(file);
         let _ = reader.seek(std::io::SeekFrom::End(0)).await;
 
         let mut interval = tokio::time::interval(std::time::Duration::from_millis(1000));
         loop {
             interval.tick().await;
+            if log_streams().lock().unwrap().get(&eventName) != Some(&generation) {
+                return;
+            }
             let mut line = String::new();
             while let Ok(n) = reader.read_line(&mut line).await {
                 if n == 0 { break; }
@@ -3068,7 +3237,7 @@ async fn stream_log_file(app: tauri::AppHandle, eventName: String, path: String)
         }
     });
 
-    Ok(())
+    Ok(generation)
 }
 
 #[tauri::command]
@@ -3129,6 +3298,14 @@ pub fn run() {
             last_stats_refresh: AtomicU64::new(0),
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
             pending_update: Mutex::new(None),
+            devstack_dir: Mutex::new(detect_install_base_dir_internal().ok().flatten()),
+        })
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { .. } = event {
+                if window.label() == "main" {
+                    stop_devstack_processes(window.app_handle());
+                }
+            }
         })
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_shell::init())
@@ -3148,6 +3325,7 @@ pub fn run() {
             get_system_stats,
             check_ports_status,
             path_exists,
+            find_redis_server,
             list_subdirs,
             list_node_versions,
             activate_node_version,
@@ -3170,6 +3348,9 @@ pub fn run() {
             kill_process_by_port_admin,
             kill_process_by_name,
             kill_process_by_name_exact,
+            set_devstack_dir,
+            append_app_log,
+            vc_runtime_installed,
             start_detached_process,
             update_ini_value,
             configure_apache_php,
@@ -3191,6 +3372,7 @@ pub fn run() {
             remove_virtual_host,
             read_file_tail,
             stream_log_file,
+            stop_log_stream,
             spawn_command_stream,
             cloudflare_is_authenticated,
             cloudflare_login,
@@ -3239,8 +3421,7 @@ pub fn run() {
                 .show_menu_on_left_click(false)
                 .on_menu_event(|app, event| match event.id.as_ref() {
                     "quit" => {
-                        // In a real production app, we might want to emit an event to JS 
-                        // to stop services first, but for now we'll do a clean exit.
+                        stop_devstack_processes(app);
                         app.exit(0);
                     }
                     "show" => {
@@ -3281,11 +3462,21 @@ mod tests {
     #[test]
     fn httpd_patch_keeps_custom_lines_and_is_idempotent() {
         let conf = "Define SRVROOT \"C:/old\"\r\nServerRoot \"C:/old\"\r\nListen 80\r\n#ServerName www.example.com:80\r\nDocumentRoot \"C:/old/htdocs\"\r\n#LoadModule proxy_module modules/mod_proxy.so\r\nTimeout 600 # my custom line\r\n";
-        let once = patch_httpd_conf(conf, "F:/devstack/bin/apache/apache-2.4.66", "F:/devstack/www");
+        let once = patch_httpd_conf(conf, "F:/devstack/bin/apache/apache-2.4.66", "F:/devstack/www", 80);
         assert!(once.contains("Timeout 600 # my custom line"));
         assert!(once.contains("ServerRoot \"F:/devstack/bin/apache/apache-2.4.66\""));
         assert!(once.contains("\nLoadModule proxy_module modules/mod_proxy.so"));
-        assert_eq!(patch_httpd_conf(&once, "F:/devstack/bin/apache/apache-2.4.66", "F:/devstack/www"), once);
+        assert_eq!(patch_httpd_conf(&once, "F:/devstack/bin/apache/apache-2.4.66", "F:/devstack/www", 80), once);
+    }
+
+    #[test]
+    fn httpd_patch_moves_http_port_and_keeps_443() {
+        let conf = "Listen 443\r\nListen 80\r\nServerName localhost:80\r\n#ServerName www.example.com:80\r\nServerName localhost:80\r\n";
+        let out = patch_httpd_conf(conf, "F:/a", "F:/www", 8080);
+        assert!(out.contains("Listen 443\r\nListen 8080\r\nServerName localhost:8080\r\n#ServerName www.example.com:80\r\nServerName localhost:8080\r\n"), "{out:?}");
+        assert_eq!(patch_httpd_conf(&out, "F:/a", "F:/www", 8080), out);
+        let bound = patch_httpd_conf("Listen 127.0.0.1:80\r\n", "F:/a", "F:/www", 8080);
+        assert!(bound.starts_with("Listen 127.0.0.1:8080\r\n"), "{bound:?}");
     }
 
     #[test]

@@ -27,10 +27,6 @@ export const getApacheDir = (state, version) => {
 
 export const getMailpitExe = (state) => `${getBinDir(state)}/mail/mailpit/mailpit.exe`.replace(/\//g, '\\');
 
-export const getRedisDir = (state) => {
-    return `${getBinDir(state)}/redis`;
-};
-
 export const getWwwDir = (state) => {
     return state.settings?.rootPath || `${getDevDir(state)}/www`;
 };

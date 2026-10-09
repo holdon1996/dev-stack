@@ -27,8 +27,16 @@ export const createMysqlSlice = (set, get) => ({
     },
 
     startMysql: async () => {
-        const active = get().mysqlVersions.find(v => v.active && v.installed);
-        if (!active) return false;
+        let active = get().mysqlVersions.find(v => v.active && v.installed);
+        if (!active) {
+            const installed = get().mysqlVersions.find(v => v.installed);
+            if (!installed) {
+                get().showToast(get().t('noVersionInstalled', { name: 'MySQL' }), 'warn', { action: { label: get().t('guideOpenPage'), page: 'database' } });
+                return false;
+            }
+            await get().setActiveMysql(installed.version);
+            active = installed;
+        }
 
         const path = getMysqlDir(get(), active.version).replace(/\//g, '\\');
         const exe = `${path}\\bin\\mysqld.exe`;
@@ -49,6 +57,8 @@ export const createMysqlSlice = (set, get) => ({
             return true;
         } catch (e) {
             console.error('Failed to start MySQL natively', e);
+            get().showToast(get().t('serviceStartFailed', { name: 'MySQL', error: `${e}` }), 'danger', { action: { label: get().t('guideHowToFix'), guide: 'troubleshooting' } });
+            get().addServiceLog('mysql', `${e}`, 'err');
             return false;
         }
     },
@@ -79,21 +89,22 @@ export const createMysqlSlice = (set, get) => ({
         const devDir = get().settings.devStackDir.replace(/\\/g, '/');
         const mysqlDir = `${devDir}/bin/mysql/mysql-${version}`;
 
+        const unlisteners = [];
         try {
             const { invoke } = await import('@tauri-apps/api/core');
             const { listen } = await import('@tauri-apps/api/event');
 
-            const unlistenLogs = await listen('db-install-log', (event) => {
+            unlisteners.push(await listen('db-install-log', (event) => {
                 const line = event.payload;
                 set(s => ({ mysqlInstallLogs: [...s.mysqlInstallLogs, { t: new Date().toLocaleTimeString(), m: line, l: 'info' }] }));
-            });
+            }));
 
-            const unlistenProgress = await listen('download-progress', (event) => {
+            unlisteners.push(await listen('download-progress', (event) => {
                 const { svcType, pct, downloaded, total } = event.payload;
                 if (svcType === 'db') {
                     set({ mysqlInstallProgress: { pct, downloaded, total } });
                 }
-            });
+            }));
 
             const result = await invoke('install_binary', {
                 svcType: 'db',
@@ -103,13 +114,10 @@ export const createMysqlSlice = (set, get) => ({
                 expectedSizeMb: null
             });
 
-            unlistenLogs();
-            unlistenProgress();
-
-            if (result === "SUCCESS") {
-                set(s => ({ mysqlVersions: s.mysqlVersions.map(mv => mv.version === version ? { ...mv, installed: true, installing: false } : mv) }));
-                get().showToast(`MySQL ${version} installed`, 'ok');
-            }
+            if (result !== "SUCCESS") throw result;
+            set(s => ({ mysqlVersions: s.mysqlVersions.map(mv => mv.version === version ? { ...mv, installed: true, installing: false } : mv) }));
+            get().showToast(`MySQL ${version} installed`, 'ok');
+            if (!get().mysqlVersions.some(mv => mv.active && mv.installed)) await get().setActiveMysql(version);
         } catch (e) {
             console.error('installMysqlVersion error:', e);
             set(s => ({
@@ -117,6 +125,8 @@ export const createMysqlSlice = (set, get) => ({
                 mysqlInstallLogs: [...s.mysqlInstallLogs, { t: new Date().toLocaleTimeString(), m: `Error: ${e}`, l: 'err' }]
             }));
             get().showToast('Installation failed', 'danger');
+        } finally {
+            unlisteners.forEach(un => un());
         }
     },
 

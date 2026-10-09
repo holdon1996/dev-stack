@@ -1,7 +1,8 @@
 import { getApacheDir, getCertDir, getLogDir, getPhpDir, toWinPath as win } from '../lib/paths';
 import { getMkcertPath } from '../lib/ssl';
+import { MANIFEST_FILE, buildManifest, envNames, parseManifest, planManifestImport } from '../lib/manifest';
 import {
-    assignFcgiPorts, buildVhosts, defaultSiteConfig, detectFromFiles, fcgiPorts, findHostConflicts, isValidHost, legacyDomain, usesFcgi,
+    assignFcgiPorts, buildVhosts, declaredVitePort, defaultSiteConfig, detectFromFiles, proxyPortsInVhosts, fcgiPorts, findHostConflicts, isValidHost, legacyDomain, usesFcgi,
     needsHostsEntry, parseHostsOutsideBlock, parseLegacyVhost, requiresHttps, siteHosts, validateSiteConfig,
 } from '../lib/sites';
 
@@ -75,8 +76,9 @@ export const createSiteSlice = (set, get) => ({
         let detected = null;
 
         const apacheRoot = get()._activeApacheRoot();
+        let vhosts = '';
         if (apacheRoot) {
-            const vhosts = await invoke('read_text_file', { path: win(`${apacheRoot}/conf/extra/httpd-vhosts.conf`) }).catch(() => '');
+            vhosts = await invoke('read_text_file', { path: win(`${apacheRoot}/conf/extra/httpd-vhosts.conf`) }).catch(() => '');
             detected = parseLegacyVhost(vhosts, legacyDomain(site.key), site.path);
         }
 
@@ -87,12 +89,18 @@ export const createSiteSlice = (set, get) => ({
                 publicIndex: await exists('public\\index.php'),
                 artisan: await exists('artisan'),
                 packageJson: await invoke('read_text_file', { path: `${base}\\package.json` }).catch(() => null),
+                viteConfig: null,
             };
-            const usedPorts = [...reservedPorts, ...Object.entries(get().siteConfigs)
+            for (const ext of ['js', 'ts', 'mjs', 'mts', 'cjs']) {
+                facts.viteConfig = await invoke('read_text_file', { path: `${base}\\vite.config.${ext}` }).catch(() => null);
+                if (facts.viteConfig) break;
+            }
+            const usedPorts = [...reservedPorts, ...proxyPortsInVhosts(vhosts), ...Object.entries(get().siteConfigs)
                 .filter(([key, cfg]) => key !== site.key && cfg.managed && cfg.type === 'proxy')
                 .map(([, cfg]) => cfg.proxyPort)];
             detected = detectFromFiles(facts, usedPorts);
-            if (detected.type === 'proxy') {
+            // A port the project declares is kept as is (its Vite may already be running on it).
+            if (detected.type === 'proxy' && !declaredVitePort(facts)) {
                 // Skip ports another program is already listening on.
                 for (let i = 0; i < 50; i++) {
                     const [busy] = await invoke('check_ports_status', { ports: [detected.proxyPort] });
@@ -172,6 +180,105 @@ export const createSiteSlice = (set, get) => ({
             return ok;
         } catch (e) {
             get().showToast(`${e}`, 'danger');
+            return false;
+        }
+    },
+
+    /** `devstack.json` files one or two folder levels below www (e.g. a workspace folder next to the repos). */
+    findProjectManifests: async () => {
+        const { invoke } = await import('@tauri-apps/api/core');
+        const www = (get().settings.rootPath || '').replace(/[\\/]+$/, '');
+        if (!www) return [];
+        const found = [];
+        const check = async (dir) => {
+            const file = win(`${dir}/${MANIFEST_FILE}`);
+            if (await invoke('path_exists', { path: file })) found.push(file);
+        };
+        for (const top of await invoke('list_subdirs', { path: win(www) }).catch(() => [])) {
+            await check(`${www}/${top}`);
+            for (const sub of await invoke('list_subdirs', { path: win(`${www}/${top}`) }).catch(() => [])) {
+                if (!['node_modules', 'vendor', '.git'].includes(sub)) await check(`${www}/${top}/${sub}`);
+            }
+        }
+        return found;
+    },
+
+    /**
+     * Applies a project's `devstack.json`: every listed folder found under www becomes a
+     * managed site with the shared settings, in one apply. Returns true when applied.
+     */
+    importProjectManifest: async (path) => {
+        const { t, showToast } = get();
+        const { invoke } = await import('@tauri-apps/api/core');
+        const { open, ask } = await import('@tauri-apps/plugin-dialog');
+        const file = path || await open({ multiple: false, filters: [{ name: 'devstack.json', extensions: ['json'] }] });
+        if (!file) return false;
+        const text = await invoke('read_text_file', { path: file }).catch(e => { showToast(`${e}`, 'danger'); return null; });
+        if (text === null) return false;
+
+        const manifest = parseManifest(text);
+        if (manifest.errors.length) {
+            const e = manifest.errors[0];
+            showToast(e.key ? t('manifestInvalidSite', { project: e.key, error: t(e.codes[0], { max: 10 }) }) : t(e.codes[0]), 'danger');
+            return false;
+        }
+        await get().scanSites();
+        const { configs, missing } = planManifestImport(manifest.sites, get().sites.map(s => s.key));
+        if (!Object.keys(configs).length) {
+            showToast(t('manifestNothingFound', { projects: missing.join(', ') }), 'warn');
+            return false;
+        }
+        // Everything the file changes on this machine is shown before applying: aliases go into
+        // the hosts file, env variables and processes into what runs when the group starts.
+        const summary = Object.entries(configs).map(([key, cfg]) => [
+            `• ${key} → ${cfg.ssl ? 'https' : 'http'}://${cfg.domain}${cfg.aliases.length ? ` (+ ${cfg.aliases.join(', ')})` : ''}`,
+            ...(envNames(cfg.env).length ? [`    ${t('manifestEnvLine', { names: envNames(cfg.env).join(', ') })}`] : []),
+            ...(cfg.processes || []).map(p => `    ↳ ${p.name}: ${p.cwd ? `[${p.cwd}] ` : ''}${p.command}`),
+        ].join('\n')).join('\n');
+        const groupEnvLine = manifest.group && envNames(manifest.groupEnv).length
+            ? `\n\n${t('manifestGroupEnvLine', { group: manifest.group, names: envNames(manifest.groupEnv).join(', ') })}`
+            : '';
+        const confirmed = await ask(
+            `${t('manifestConfirm', { name: manifest.name || manifest.group || file })}\n\n${summary}${groupEnvLine}${missing.length ? `\n\n${t('manifestMissing', { projects: missing.join(', ') })}` : ''}`,
+            { title: 'DevStack', kind: 'info', okLabel: t('manifestApply'), cancelLabel: t('cancel') },
+        );
+        if (!confirmed) return false;
+
+        // Keep this machine's FastCGI port blocks and, unless the file sets one, its env.
+        const merged = Object.fromEntries(Object.entries(configs).map(([key, cfg]) => [key, {
+            ...cfg,
+            env: cfg.env || get().siteConfigs[key]?.env || '',
+            fcgiPortBase: get().siteConfigs[key]?.fcgiPortBase,
+        }]));
+        if (manifest.group && manifest.groupEnv) get().setGroupEnv(manifest.group, manifest.groupEnv);
+        const ok = await get().saveSiteConfigs(merged);
+        if (ok) showToast(t('manifestImported', { count: Object.keys(merged).length }), 'ok');
+        if (ok && missing.length) showToast(t('manifestMissing', { projects: missing.join(', ') }), 'warn');
+        return ok;
+    },
+
+    /** Writes the managed sites of `group` (all managed sites when empty) to a `devstack.json`. */
+    exportProjectManifest: async (group = '') => {
+        const { t, showToast, siteConfigs } = get();
+        const keys = Object.keys(siteConfigs).filter(k => siteConfigs[k].managed && (!group || siteConfigs[k].group === group));
+        if (!keys.length) {
+            showToast(t('manifestNoSites'), 'warn');
+            return false;
+        }
+        const { save } = await import('@tauri-apps/plugin-dialog');
+        const target = await save({
+            defaultPath: win(`${(get().settings.rootPath || '').replace(/[\\/]+$/, '')}/${MANIFEST_FILE}`),
+            filters: [{ name: 'devstack.json', extensions: ['json'] }],
+        });
+        if (!target) return false;
+        const manifest = buildManifest({ name: group, group, keys, siteConfigs });
+        const { invoke } = await import('@tauri-apps/api/core');
+        try {
+            await invoke('write_text_file', { path: target, content: `${JSON.stringify(manifest, null, 2)}\n` });
+            showToast(t('manifestExported', { count: keys.length, path: target }), 'ok');
+            return true;
+        } catch (e) {
+            showToast(`${e}`, 'danger');
             return false;
         }
     },
@@ -293,6 +400,10 @@ export const createSiteSlice = (set, get) => ({
             }
             if (report.removedLegacyVhosts) {
                 addServiceLog('apache', t('removedLegacyVhosts', { count: report.removedLegacyVhosts }), 'info');
+                // Tunnels, bookmarks or webhooks still using a removed host would now hit another site.
+                const managedHosts = new Set(managed.flatMap(s => siteHosts(s.cfg)));
+                const gone = (report.removedHosts || []).filter(host => !managedHosts.has(host));
+                if (gone.length) showToast(t('legacyHostsRemovedWarn', { hosts: gone.join(', ') }), 'warn');
             }
 
             await get().syncHosts({ legacy: legacyHosts });
@@ -305,7 +416,7 @@ export const createSiteSlice = (set, get) => ({
         } catch (e) {
             const message = typeof e === 'string' ? e : e?.message || String(e);
             addServiceLog('apache', message, 'err');
-            showToast(message.split('\n')[0], 'danger');
+            showToast(message.split('\n')[0], 'danger', { action: { label: t('guideHowToFix'), guide: 'troubleshooting' } });
             return false;
         } finally {
             set({ siteApplying: false });
@@ -421,6 +532,19 @@ export const createSiteSlice = (set, get) => ({
         }
     },
 
+    /**
+     * After a crash or forced exit the php-cgi pools outlive the app: unsupervised,
+     * and their ports look "busy" so pools would move. On a fresh launch (no pool
+     * registered yet) kill those orphans and, if Apache is up, start the pools again.
+     */
+    _adoptFcgiPoolsAfterRestart: async () => {
+        if (!get()._sitesWithFcgi().some(s => s.fcgi)) return;
+        if (Object.keys(get().procs).some(id => id.startsWith('fcgi:'))) return;
+        const { invoke } = await import('@tauri-apps/api/core');
+        await invoke('kill_process_by_name_exact', { name: 'php-cgi.exe' }).catch(() => false);
+        if (get().services.find(s => s.type === 'web')?.status === 'running') await get().ensureFcgiBackends();
+    },
+
     stopFcgiPools: async () => {
         const ids = Object.keys(get().procs).filter(id => id.startsWith('fcgi:') || id.startsWith('php-fcgi-'));
         for (const id of ids) await get().stopProcess(id);
@@ -435,18 +559,11 @@ export const createSiteSlice = (set, get) => ({
     })),
 
     /** The pre-DevStack Hub workaround (manual vhost block + scripts/hub-fcgi.ps1) must go. */
+    /** A hand-written region or balancer left outside the DevStack block may clash with it. */
     _remindOldFcgiSetup: async (report) => {
-        if (!get()._sitesWithFcgi().some(s => s.fcgi)) return;
-        const { invoke } = await import('@tauri-apps/api/core');
-        if (report.manualBlockLeft) get().showToast(get().t('manualFcgiBlockReminder'), 'warn');
-        for (const port of [9201, 9202, 9203, 9204]) {
-            const owner = await invoke('port_owner', { port }).catch(() => null);
-            if (owner && /php-cgi/i.test(owner.name)) {
-                get().showToast(get().t('hubFcgiScriptReminder'), 'warn');
-                get().addServiceLog('apache', get().t('hubFcgiScriptReminder'), 'warn');
-                return;
-            }
-        }
+        if (!get()._sitesWithFcgi().some(s => s.fcgi) || !report.manualBlockLeft) return;
+        get().showToast(get().t('manualFcgiBlockReminder'), 'warn');
+        get().addServiceLog('apache', get().t('manualFcgiBlockReminder'), 'warn');
     },
 
     checkApacheConfigStale: async () => {

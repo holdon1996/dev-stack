@@ -93,10 +93,16 @@ export const createApacheSlice = (set, get) => ({
     },
 
     startApache: async () => {
-        const active = get().apacheVersions.find(v => v.active && v.installed);
+        let active = get().apacheVersions.find(v => v.active && v.installed);
         if (!active) {
-            get().showToast('No active Apache version found!', 'warn');
-            return false;
+            // Installed but never activated: the most common first-day blocker.
+            const installed = get().apacheVersions.find(v => v.installed);
+            if (!installed) {
+                get().showToast(get().t('noVersionInstalled', { name: 'Apache' }), 'warn', { action: { label: get().t('guideOpenPage'), page: 'apache' } });
+                return false;
+            }
+            await get().setActiveApache(installed.version);
+            active = installed;
         }
 
         try {
@@ -125,7 +131,8 @@ export const createApacheSlice = (set, get) => ({
             await invoke('create_dir', { path: rootPath.replace(/\//g, '\\') });
             await invoke('patch_apache_paths', {
                 newServerRoot: resolvedRoot,
-                newDocRoot: rootPath
+                newDocRoot: rootPath,
+                port: parseInt(get().settings.port80) || 80,
             });
             await invoke('ensure_apache_log_files', {
                 apacheRoot: resolvedRoot
@@ -151,6 +158,8 @@ export const createApacheSlice = (set, get) => ({
             return true;
         } catch (e) {
             console.error('Failed to start Apache natively', e);
+            get().showToast(get().t('serviceStartFailed', { name: 'Apache', error: `${e}` }), 'danger', { action: { label: get().t('guideHowToFix'), guide: 'troubleshooting' } });
+            get().addServiceLog('apache', `${e}`, 'err');
             return false;
         }
     },
@@ -161,7 +170,10 @@ export const createApacheSlice = (set, get) => ({
         if (activePhp) await get().configureApachePhp(activePhp.version, version);
         // Managed vhosts live in each version's httpd-vhosts.conf; write them for the new one.
         if (get()._managedSites().length) await get().applySites({ restart: false });
-        await get().restartApache();
+        // Only a running Apache is restarted: activating during Start (or after the first
+        // install) must not start a second httpd.
+        const web = get().services.find(s => s.type === 'web');
+        if (web?.status === 'running' || web?.pid) await get().restartApache();
         get().showToast(`Apache ${version} activated`, 'ok');
     },
 
@@ -201,21 +213,22 @@ export const createApacheSlice = (set, get) => ({
         const devDir = get().settings.devStackDir.replace(/\\/g, '/');
         const destDir = `${devDir}/bin/apache/apache-${version}`;
 
+        const unlisteners = [];
         try {
             const { invoke } = await import('@tauri-apps/api/core');
             const { listen } = await import('@tauri-apps/api/event');
 
-            const unlistenLogs = await listen('web-install-log', (event) => {
+            unlisteners.push(await listen('web-install-log', (event) => {
                 const line = event.payload;
                 set(s => ({ apacheInstallLogs: [...s.apacheInstallLogs, { t: new Date().toLocaleTimeString(), m: line, l: 'info' }] }));
-            });
+            }));
 
-            const unlistenProgress = await listen('download-progress', (event) => {
+            unlisteners.push(await listen('download-progress', (event) => {
                 const { svcType, pct, downloaded, total } = event.payload;
                 if (svcType === 'web') {
                     set({ apacheInstallProgress: { pct, downloaded, total } });
                 }
-            });
+            }));
 
             const result = await invoke('install_binary', {
                 svcType: 'web',
@@ -225,13 +238,11 @@ export const createApacheSlice = (set, get) => ({
                 expectedSizeMb: null
             });
 
-            unlistenLogs();
-            unlistenProgress();
-
-            if (result === "SUCCESS") {
-                set(s => ({ apacheVersions: s.apacheVersions.map(av => av.version === version ? { ...av, installed: true, installing: false } : av) }));
-                get().showToast(`Apache ${version} installed`, 'ok');
-            }
+            if (result !== "SUCCESS") throw result;
+            set(s => ({ apacheVersions: s.apacheVersions.map(av => av.version === version ? { ...av, installed: true, installing: false } : av) }));
+            get().showToast(`Apache ${version} installed`, 'ok');
+            // First install: activate it so Start works right away.
+            if (!get().apacheVersions.some(av => av.active && av.installed)) await get().setActiveApache(version);
         } catch (e) {
             console.error('installApacheVersion error:', e);
             set(s => ({
@@ -239,6 +250,8 @@ export const createApacheSlice = (set, get) => ({
                 apacheInstallLogs: [...s.apacheInstallLogs, { t: new Date().toLocaleTimeString(), m: `Error: ${e}`, l: 'err' }]
             }));
             get().showToast('Installation failed', 'danger');
+        } finally {
+            unlisteners.forEach(un => un());
         }
     },
 

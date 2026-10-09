@@ -1,4 +1,4 @@
-import { getBinDir, getDevDir, getMysqlDir, getPhpDir, getRedisDir, toWinPath as win } from '../lib/paths';
+import { getBinDir, getDevDir, getMysqlDir, getPhpDir, toWinPath as win } from '../lib/paths';
 import { parseEnvText, siteProcesses } from '../lib/sites';
 
 const MC_URL = 'https://dl.min.io/client/mc/release/windows-amd64/mc.exe';
@@ -51,7 +51,7 @@ export const createProcessSlice = (set, get) => ({
         return [
             php && getPhpDir(st, php),
             mysql && `${getMysqlDir(st, mysql.version)}/bin`,
-            getRedisDir(st),
+            st.redisDir,
             `${getBinDir(st)}/tools`,
             `${getBinDir(st)}/tunnels`,
             `${devDir}/bin/node/current`,
@@ -188,8 +188,10 @@ export const createProcessSlice = (set, get) => ({
             await invoke('download_file_with_progress', { svcType: 'storage', label: 'minio.exe', url: 'https://dl.min.io/server/minio/release/windows-amd64/minio.exe', destPath: exe });
             await invoke('download_file_with_progress', { svcType: 'storage', label: 'mc.exe', url: MC_URL, destPath: mc });
             get().showToast(get().t('minioInstalled'), 'ok');
+            return true;
         } catch (e) {
             get().showToast(`${e}`, 'danger');
+            return false;
         }
     },
 
