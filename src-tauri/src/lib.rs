@@ -894,25 +894,25 @@ fn greet(name: &str) -> String {
     format!("Hello, {}! You've been greeted from Rust!", name)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn check_ports_status(ports: Vec<u16>) -> Vec<bool> {
-    use std::net::TcpStream;
+    use std::net::{Ipv4Addr, SocketAddr, TcpStream};
     use std::time::Duration;
-    ports.iter().map(|&port| {
-        if port == 0 { return false; }
-        // Connect-based detection is reliable on Windows.
-        // - If a service IS listening (XAMPP, DevStack Apache, etc.) → connect succeeds → busy.
-        // - If port is free → connection refused immediately → not busy.
-        // This avoids SO_REUSEADDR false-negatives from bind() and IPv6 false-positives.
-        let addr = format!("127.0.0.1:{}", port);
-        match addr.parse() {
-            Ok(sock_addr) => TcpStream::connect_timeout(&sock_addr, Duration::from_millis(150)).is_ok(),
-            Err(_) => false,
-        }
-    }).collect()
+    // Connect-based detection is reliable on Windows: a listener (XAMPP, DevStack Apache, etc.)
+    // accepts at once -> busy. It avoids SO_REUSEADDR false-negatives from bind() and IPv6
+    // false-positives. A free loopback port is refused only after ~2 s of SYN retries on Windows,
+    // so every free port waits out the timeout: probe all ports in parallel, not one by one.
+    let busy = |port: u16| {
+        port != 0
+            && TcpStream::connect_timeout(&SocketAddr::from((Ipv4Addr::LOCALHOST, port)), Duration::from_millis(150)).is_ok()
+    };
+    std::thread::scope(|s| {
+        let probes: Vec<_> = ports.iter().map(|&port| s.spawn(move || busy(port))).collect();
+        probes.into_iter().map(|p| p.join().unwrap_or(false)).collect()
+    })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn kill_process_by_name(state: tauri::State<'_, AppState>, name: String) -> bool {
     kill_process_by_name_exact(state, name, None)
 }
@@ -951,7 +951,7 @@ fn kill_by_name_under(sys: &mut System, name: &str, under_dir: Option<&str>) -> 
 
 /// `under_dir` defaults to the DevStack folder; only binaries inside it are killed.
 /// With no folder known nothing is killed: a bare name match would hit other tools.
-#[tauri::command]
+#[tauri::command(async)]
 fn kill_process_by_name_exact(state: tauri::State<'_, AppState>, name: String, under_dir: Option<String>) -> bool {
     let dir = under_dir
         .filter(|d| dir_prefix(d).is_some())
@@ -1052,7 +1052,7 @@ fn find_listening_pid(port: u16) -> Option<u32> {
     { let _ = port; None }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn kill_process_by_port(state: tauri::State<'_, AppState>, port: u16) -> bool {
     if let Some(pid) = find_listening_pid(port) {
         let mut sys = state.sys.lock().unwrap();
@@ -1064,7 +1064,7 @@ fn kill_process_by_port(state: tauri::State<'_, AppState>, port: u16) -> bool {
     false
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn kill_process_by_port_admin(port: u16) -> bool {
     #[cfg(target_os = "windows")]
     {
@@ -2079,7 +2079,7 @@ fn update_ini_value(file_path: String, key: String, value: String) -> bool {
     fs::write(file_path, updated.to_string()).is_ok()
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn configure_apache_php(
     apache_conf_path: String,
     php_dir: String,
@@ -2471,7 +2471,7 @@ fn patch_mysql_paths(ini_path: String, new_mysql_root: String, port: Option<u16>
 }
 
 
-#[tauri::command]
+#[tauri::command(async)]
 fn scan_processes(state: tauri::State<'_, AppState>, dev_dir: String) -> Vec<serde_json::Value> {
     let mut sys = state.sys.lock().unwrap();
     
@@ -2556,7 +2556,7 @@ fn scan_processes(state: tauri::State<'_, AppState>, dev_dir: String) -> Vec<ser
     groups.into_values().collect()
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn get_system_stats(state: tauri::State<'_, AppState>) -> serde_json::Value {
     let mut sys = state.sys.lock().unwrap();
     
@@ -3451,7 +3451,25 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
-    use super::{patch_httpd_conf, upsert_mysqld_values};
+    use super::{check_ports_status, patch_httpd_conf, upsert_mysqld_values};
+
+    #[test]
+    fn port_check_finds_listener_and_probes_free_ports_in_parallel() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let open = listener.local_addr().unwrap().port();
+        // Bound then dropped: free ports that each wait out the connect timeout.
+        let free: Vec<u16> = (0..40)
+            .map(|_| std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port())
+            .collect();
+        let mut ports = vec![open, 0];
+        ports.extend(&free);
+
+        let started = std::time::Instant::now();
+        let busy = check_ports_status(ports);
+        assert!(started.elapsed() < std::time::Duration::from_secs(2), "took {:?}", started.elapsed());
+        assert_eq!(busy[..2], [true, false]);
+        assert!(busy[2..].iter().all(|b| !b));
+    }
 
     #[test]
     fn httpd_patch_keeps_custom_lines_and_is_idempotent() {

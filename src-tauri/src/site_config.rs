@@ -424,7 +424,7 @@ pub fn sync_hosts_content(content: &str, entries: &[(String, String)], remove: &
     replace_managed_block(&cleaned, "HOSTS", "#", &body)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn sync_hosts_domains(entries: Vec<HostEntry>, remove: Vec<String>, legacy: Vec<String>) -> Result<(), String> {
     if let Some(bad) = entries.iter().map(|e| &e.host).find(|d| !is_valid_host(d)) {
         return Err(format!("Invalid host name: {bad}"));
@@ -761,7 +761,7 @@ pub fn enable_extension_line(content: &str, ext: &str) -> String {
     format!("{content}{sep}extension={ext}\r\n")
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn ensure_php_extension(ini_path: String, ext: String) -> Result<(), String> {
     let path = PathBuf::from(&ini_path);
     let old = fs::read_to_string(&path).map_err(|e| format!("Cannot read {ini_path}: {e}"))?;
