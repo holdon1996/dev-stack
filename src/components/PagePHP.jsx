@@ -279,10 +279,11 @@ const PagePHP = () => {
                           `}
                           title={isActuallyActive ? t('uninstallDeactivateFirst') : t('uninstall')}
                           onClick={async () => {
-                            const msg = isActuallyActive
-                              ? t('phpActiveUninstallConfirm', { version: p.version })
-                              : t('uninstallPhpConfirm', { version: p.version });
-                            const confirmed = await ask(msg, {
+                            if (isActuallyActive) {
+                              uninstallPhpVersion(p.version); // refuses with a toast: activate another version first
+                              return;
+                            }
+                            const confirmed = await ask(t('uninstallPhpConfirm', { version: p.version }), {
                               title: 'DevStack',
                               kind: 'warning',
                               okLabel: t('uninstallLabel'),

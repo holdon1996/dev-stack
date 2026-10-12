@@ -381,42 +381,6 @@ fn set_start_on_boot(enabled: bool) -> Result<(), String> {
     }
 }
 
-#[cfg(target_os = "windows")]
-fn sync_hosts_entry(domain: &str, present: bool) -> Result<(), String> {
-    let hosts_path = Path::new("C:\\Windows\\System32\\drivers\\etc\\hosts");
-    let entry = format!("127.0.0.1 {}", domain);
-    let bytes = fs::read(hosts_path).map_err(|e| e.to_string())?;
-    let mut content = String::from_utf8_lossy(strip_utf8_bom(&bytes)).to_string();
-
-    if present {
-        let exists = content.lines().any(|line| line.trim() == entry);
-        if !exists {
-            if !content.is_empty() && !content.ends_with('\n') {
-                content.push_str("\r\n");
-            }
-            content.push_str(&entry);
-            content.push_str("\r\n");
-        }
-    } else {
-        let mut lines = content
-            .lines()
-            .filter(|line| line.trim() != entry)
-            .map(|line| line.to_string())
-            .collect::<Vec<_>>();
-        content = lines.join("\r\n");
-        if !content.is_empty() {
-            content.push_str("\r\n");
-        }
-    }
-
-    let mut out = Vec::new();
-    if has_utf8_bom(&bytes) {
-        out.extend_from_slice(&[0xEF, 0xBB, 0xBF]);
-    }
-    out.extend_from_slice(content.as_bytes());
-    fs::write(hosts_path, out).map_err(|e| format!("Cannot update hosts file. Run DevStack as Administrator: {}", e))
-}
-
 fn copy_first_existing_template(dest_path: &Path, target_name: &str, candidates: &[&str]) -> Result<bool, String> {
     for candidate in candidates {
         let source = dest_path.join(candidate);
@@ -1271,14 +1235,20 @@ fn create_dir(path: String) -> bool {
     std::fs::create_dir_all(&path).is_ok()
 }
 
-#[tauri::command]
-fn remove_dir(path: String) -> bool {
-    std::fs::remove_dir_all(&path).is_ok()
+/// Deletes a folder tree off the main thread (installs and projects can be large) and reports
+/// why it failed, e.g. files still locked by a running php-cgi, mysqld or node.
+#[tauri::command(async)]
+fn remove_dir(path: String) -> Result<(), String> {
+    match std::fs::remove_dir_all(&path) {
+        Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(format!("Cannot delete {path}: {e}")),
+        _ => Ok(()),
+    }
 }
 
 /// Uncomment a specific extension in php.ini (e.g., ";extension=curl" -> "extension=curl")
 #[tauri::command]
 fn enable_php_extension(ini_path: String, ext: String) -> bool {
+    let _config = crate::site_config::config_lock();
     let content = match std::fs::read_to_string(&ini_path) {
         Ok(c) => c,
         Err(_) => return false,
@@ -1295,6 +1265,7 @@ fn enable_php_extension(ini_path: String, ext: String) -> bool {
 
 #[tauri::command]
 fn disable_php_extension(ini_path: String, ext: String) -> bool {
+    let _config = crate::site_config::config_lock();
     let content = match std::fs::read_to_string(&ini_path) {
         Ok(c) => c,
         Err(_) => return false,
@@ -1324,6 +1295,7 @@ fn get_php_ini_extensions(ini_path: String) -> Result<Vec<String>, String> {
 /// Enable common PHP extensions in php.ini (uncomments them if commented out)
 #[tauri::command]
 fn patch_php_ini_extensions(ini_path: String) -> bool {
+    let _config = crate::site_config::config_lock();
     let exts = [
         "bcmath",
         "curl",
@@ -1616,8 +1588,16 @@ fn write_user_path_value(path_value: &str) -> Result<(), String> {
     let (env, _) = hkcu
         .create_subkey("Environment")
         .map_err(|e| format!("Failed to open HKCU\\Environment for writing: {}", e))?;
-    env.set_value("Path", &path_value)
+    set_expandable_path(&env, path_value)
         .map_err(|e| format!("Failed to write User PATH: {}", e))
+}
+
+/// Writes PATH as REG_EXPAND_SZ like Windows does: `set_value` with a string would store
+/// REG_SZ and every `%VAR%` entry (e.g. `%SystemRoot%`, `%LOCALAPPDATA%\...`) would stop expanding.
+#[cfg(target_os = "windows")]
+fn set_expandable_path(env: &winreg::RegKey, value: &str) -> std::io::Result<()> {
+    let bytes = value.encode_utf16().chain(std::iter::once(0)).flat_map(u16::to_le_bytes).collect();
+    env.set_raw_value("Path", &winreg::RegValue { bytes, vtype: winreg::enums::RegType::REG_EXPAND_SZ })
 }
 
 #[cfg(target_os = "windows")]
@@ -1676,7 +1656,7 @@ fn sync_machine_php_path(target: &str) -> Result<(), String> {
                 e
             )
         })?;
-    env.set_value("Path", &new_path)
+    set_expandable_path(&env, &new_path)
         .map_err(|e| format!("Failed to write Machine PATH: {}", e))
 }
 
@@ -2058,25 +2038,20 @@ fn open_main_devtools(app: tauri::AppHandle) -> Result<(), String> {
 
 #[tauri::command]
 fn update_ini_value(file_path: String, key: String, value: String) -> bool {
-    use std::fs;
-    let content = match fs::read_to_string(&file_path) {
-        Ok(c) => c,
-        Err(_) => return false,
-    };
+    let _config = crate::site_config::config_lock();
+    let Ok(content) = fs::read_to_string(&file_path) else { return false };
+    match set_ini_value(&content, &key, &value) {
+        Some(updated) => updated == content || fs::write(file_path, updated).is_ok(),
+        None => false,
+    }
+}
 
-    // Regex to match key = value (case insensitive key)
-    let re_str = format!(r"(?i)(^\s*{}\s*=\s*).*(\r?\n?)", key);
-    let re = match regex::Regex::new(&re_str) {
-        Ok(r) => r,
-        Err(_) => return false,
-    };
-
-    let new_line = format!("{} {}$2", key, value);
-    let updated = re.replace_all(&content, |caps: &regex::Captures| {
-        format!("{}{}{}", &caps[1], value, &caps[2])
-    });
-
-    fs::write(file_path, updated.to_string()).is_ok()
+/// Sets every `key = ...` line (case-insensitive, any line, not only the first one of the
+/// file) to `value`. None when the key is not present, so callers do not report success.
+fn set_ini_value(content: &str, key: &str, value: &str) -> Option<String> {
+    let re = regex::Regex::new(&format!(r"(?im)^([ \t]*{}[ \t]*=[ \t]*)[^\r\n]*", regex::escape(key))).ok()?;
+    re.is_match(content)
+        .then(|| re.replace_all(content, |caps: &regex::Captures| format!("{}{}", &caps[1], value)).into_owned())
 }
 
 #[tauri::command(async)]
@@ -2087,6 +2062,7 @@ fn configure_apache_php(
     mod_name: String,
     mod_file: String
 ) -> bool {
+    let _config = crate::site_config::config_lock();
     use std::fs;
     let content = match fs::read_to_string(&apache_conf_path) {
         Ok(c) => c,
@@ -2239,6 +2215,7 @@ fn patch_httpd_conf(raw: &str, sr: &str, dr: &str, port: u16) -> String {
 
 #[tauri::command]
 fn patch_apache_paths(new_server_root: String, new_doc_root: String, port: Option<u16>) -> Result<String, String> {
+    let _config = crate::site_config::config_lock();
     use std::fs;
     use std::path::Path;
 
@@ -2349,6 +2326,7 @@ fn upsert_mysqld_values(content: &str, forced: &[(&str, String)], defaults: &[(&
 
 #[tauri::command]
 fn patch_mysql_paths(ini_path: String, new_mysql_root: String, port: Option<u16>) -> Result<String, String> {
+    let _config = crate::site_config::config_lock();
     use std::fs;
     use std::path::Path;
     use std::process::Command;
@@ -2442,8 +2420,6 @@ fn patch_mysql_paths(ini_path: String, new_mysql_root: String, port: Option<u16>
     fs::write(ini_file, &content).map_err(|e| e.to_string())?;
 
     let data_dir_path = mysql_root_path.join("data");
-    fs::create_dir_all(&data_dir_path).map_err(|e| e.to_string())?;
-
     let mysql_system_dir = data_dir_path.join("mysql");
     if !mysql_system_dir.exists() {
         let mysqld_exe = mysql_root_path.join("bin").join("mysqld.exe");
@@ -2451,20 +2427,45 @@ fn patch_mysql_paths(ini_path: String, new_mysql_root: String, port: Option<u16>
             return Err(format!("mysqld.exe not found at '{}'", mysqld_exe.display()));
         }
 
+        // Initialize into a scratch folder and move it into place only on success: an
+        // interrupted --initialize used to leave a `data` folder mysqld could never start from.
+        let init_dir = mysql_root_path.join("data.init_tmp");
+        let _ = fs::remove_dir_all(&init_dir);
         let output = Command::new(&mysqld_exe)
             .arg(format!("--defaults-file={}", ini_file.display()))
+            .arg(format!("--datadir={}", init_dir.display()))
             .arg("--initialize-insecure")
             .arg("--console")
             .creation_flags(CREATE_NO_WINDOW)
-            .output()
-            .map_err(|e| format!("Failed to initialize MySQL data directory: {}", e))?;
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-            let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            let details = if !stderr.is_empty() { stderr } else { stdout };
-            return Err(format!("Failed to initialize MySQL data directory: {}", details));
+            .output();
+        match output {
+            Ok(output) if output.status.success() => {}
+            Ok(output) => {
+                let _ = fs::remove_dir_all(&init_dir);
+                let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+                let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                let details = if !stderr.is_empty() { stderr } else { stdout };
+                return Err(format!("Failed to initialize MySQL data directory: {}", details));
+            }
+            Err(e) => {
+                let _ = fs::remove_dir_all(&init_dir);
+                return Err(format!("Failed to initialize MySQL data directory: {}", e));
+            }
         }
+
+        // A `data` folder without the `mysql` schema is unusable; keep it aside, never delete it.
+        if data_dir_path.exists() {
+            let empty = fs::read_dir(&data_dir_path).map(|mut d| d.next().is_none()).unwrap_or(false);
+            let moved = if empty {
+                fs::remove_dir(&data_dir_path)
+            } else {
+                let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+                fs::rename(&data_dir_path, mysql_root_path.join(format!("data.incomplete-{stamp}")))
+            };
+            moved.map_err(|e| format!("Cannot replace the incomplete MySQL data folder: {e}"))?;
+        }
+        retry_io(|| fs::rename(&init_dir, &data_dir_path))
+            .map_err(|e| format!("Cannot move the initialized MySQL data folder into place: {e}"))?;
     }
 
     Ok(ini_file.to_string_lossy().to_string())
@@ -2580,6 +2581,66 @@ fn get_system_stats(state: tauri::State<'_, AppState>) -> serde_json::Value {
     })
 }
 
+/// Extraction folder next to `dest`, named after the full folder name: `php-8.3.30` ->
+/// `php-8.3.30.tmp_extract` (`with_extension` would give every 8.3.x the same `php-8.3.tmp_extract`).
+fn temp_extract_dir_for(dest: &Path) -> std::path::PathBuf {
+    let name = dest.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    dest.with_file_name(format!("{name}.tmp_extract"))
+}
+
+/// Retries an IO step a few times: antivirus scans briefly lock freshly extracted files.
+fn retry_io<T>(mut step: impl FnMut() -> std::io::Result<T>) -> std::io::Result<T> {
+    let mut attempt = 0;
+    loop {
+        match step() {
+            Err(_) if attempt < 4 => {
+                attempt += 1;
+                std::thread::sleep(std::time::Duration::from_millis(500));
+            }
+            result => return result,
+        }
+    }
+}
+
+/// Moves `src` to `dest`. An existing `dest` is renamed aside first (a folder whose files are
+/// in use cannot be renamed, so a running install is never half-deleted), restored if the
+/// move fails, and deleted only once the new copy is in place. Entries named in `keep`
+/// (user data such as MySQL's `data` or a tuned `php.ini`) are carried over from the old copy.
+fn replace_dir(src: &Path, dest: &Path, keep: &[&str]) -> Result<(), String> {
+    let name = dest.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let old = dest.with_file_name(format!("{name}.old"));
+    if old.exists() {
+        fs::remove_dir_all(&old).map_err(|e| format!("Cannot remove {}: {e}", old.display()))?;
+    }
+    let had_old = dest.exists();
+    if had_old {
+        retry_io(|| fs::rename(dest, &old)).map_err(|e| {
+            format!("{} is in use; stop the services that use it and try again ({e})", dest.display())
+        })?;
+    }
+    if let Err(e) = retry_io(|| fs::rename(src, dest)) {
+        if had_old {
+            let _ = fs::rename(&old, dest);
+        }
+        return Err(format!("Failed to move files to final destination: {e}"));
+    }
+    if had_old {
+        for name in keep {
+            let (kept, target) = (old.join(name), dest.join(name));
+            if !kept.exists() {
+                continue;
+            }
+            // The new copy's default yields to the user's file or folder.
+            let _ = if target.is_dir() { fs::remove_dir_all(&target) } else { fs::remove_file(&target) };
+            retry_io(|| fs::rename(&kept, &target)).map_err(|e| {
+                format!("Cannot carry over {name} from the previous install; it is still in {}: {e}", old.display())
+            })?;
+        }
+        let _ = fs::remove_dir_all(&old);
+    }
+    Ok(())
+}
+
 #[tauri::command]
 async fn install_binary(
     app: tauri::AppHandle,
@@ -2693,79 +2754,71 @@ async fn install_binary(
         fs::create_dir_all(dest_path.parent().unwrap()).map_err(|e| e.to_string())?;
     }
 
-    let temp_extract_dir = dest_path.with_extension("tmp_extract");
+    let temp_extract_dir = temp_extract_dir_for(dest_path);
     if temp_extract_dir.exists() {
         fs::remove_dir_all(&temp_extract_dir).ok();
     }
     fs::create_dir_all(&temp_extract_dir).map_err(|e| e.to_string())?;
 
-    let cursor = std::io::Cursor::new(bytes);
-    zip_extract::extract(cursor, &temp_extract_dir, true).map_err(|e| e.to_string())?;
+    // Any failure below must not leave the extracted copy behind.
+    let placed = (|| -> Result<(), String> {
+        let cursor = std::io::Cursor::new(bytes);
+        zip_extract::extract(cursor, &temp_extract_dir, true).map_err(|e| e.to_string())?;
 
-    emit_log("Extraction finished. Finalizing paths...");
+        emit_log("Extraction finished. Finalizing paths...");
 
-    // Flatten logic
-    let mut entries = fs::read_dir(&temp_extract_dir).map_err(|e| e.to_string())?;
-    let mut source_to_move = temp_extract_dir.clone();
-    
-    // If there's only one directory inside, move that instead (common in ZIPs)
-    let mut count = 0;
-    let mut last_entry = None;
-    for entry in fs::read_dir(&temp_extract_dir).map_err(|e| e.to_string())? {
-        let entry = entry.map_err(|e| e.to_string())?;
-        if entry.path().is_dir() {
-            last_entry = Some(entry.path());
-        }
-        count += 1;
-    }
-    
-    if count == 1 && last_entry.is_some() {
-        source_to_move = last_entry.unwrap();
-    } else if svc_type == "web" {
-         // Special case for Apache (often has Apache24 folder)
-         let apache_inner = temp_extract_dir.join("Apache24");
-         if apache_inner.exists() {
-             source_to_move = apache_inner;
-         }
-    }
-
-    if svc_type == "tunnel" {
-        let tunnel_name = dest_path
-            .file_name()
-            .map(|n| n.to_string_lossy().into_owned())
-            .unwrap_or_default();
-        let final_exe_path = dest_path.with_extension("exe");
-        let candidate_exe = source_to_move.join(format!("{}.exe", tunnel_name));
-
-        if candidate_exe.exists() {
-            if final_exe_path.exists() {
-                fs::remove_file(&final_exe_path).ok();
+        // If there's only one directory inside, move that instead (common in ZIPs)
+        let mut source_to_move = temp_extract_dir.clone();
+        let mut count = 0;
+        let mut last_entry = None;
+        for entry in fs::read_dir(&temp_extract_dir).map_err(|e| e.to_string())? {
+            let entry = entry.map_err(|e| e.to_string())?;
+            if entry.path().is_dir() {
+                last_entry = Some(entry.path());
             }
-            fs::rename(&candidate_exe, &final_exe_path).map_err(|e| {
-                format!("Failed to move tunnel executable to final destination: {}", e)
-            })?;
-        } else {
-            if dest_path.exists() {
-                fs::remove_dir_all(dest_path).ok();
-            }
-            fs::rename(&source_to_move, dest_path).map_err(|e| {
-                format!("Failed to move files to final destination: {}", e)
-            })?;
+            count += 1;
         }
-    } else {
-        if dest_path.exists() {
-            fs::remove_dir_all(dest_path).ok();
-        }
-        fs::rename(source_to_move, dest_path).map_err(|e| {
-            format!("Failed to move files to final destination: {}", e)
-        })?;
-    }
 
-    // Cleanup
+        if count == 1 && last_entry.is_some() {
+            source_to_move = last_entry.unwrap();
+        } else if svc_type == "web" {
+            // Special case for Apache (often has Apache24 folder)
+            let apache_inner = temp_extract_dir.join("Apache24");
+            if apache_inner.exists() {
+                source_to_move = apache_inner;
+            }
+        }
+
+        if svc_type == "tunnel" {
+            let tunnel_name = dest_path
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            let final_exe_path = dest_path.with_extension("exe");
+            let candidate_exe = source_to_move.join(format!("{}.exe", tunnel_name));
+
+            if candidate_exe.exists() {
+                if final_exe_path.exists() {
+                    fs::remove_file(&final_exe_path).ok();
+                }
+                return fs::rename(&candidate_exe, &final_exe_path).map_err(|e| {
+                    format!("Failed to move tunnel executable to final destination: {}", e)
+                });
+            }
+        }
+        let keep: &[&str] = match svc_type.as_str() {
+            "db" => &["data", "my.ini"],
+            "php" => &["php.ini"],
+            _ => &[],
+        };
+        replace_dir(&source_to_move, dest_path, keep)
+    })();
+
     if temp_extract_dir.exists() {
         emit_log("Cleaning up temporary files...");
-        fs::remove_dir_all(temp_extract_dir).ok();
+        fs::remove_dir_all(&temp_extract_dir).ok();
     }
+    placed?;
 
     // Post-install: PHP ini
     if svc_type == "php" {
@@ -3234,49 +3287,19 @@ async fn stream_log_file(app: tauri::AppHandle, eventName: String, path: String)
     Ok(generation)
 }
 
-#[tauri::command]
-fn remove_virtual_host(domain: String, vhosts_file: String) -> Result<String, String> {
-    if let Ok(content) = std::fs::read_to_string(&vhosts_file) {
-        let mut out_content = String::new();
-        let mut current_block = String::new();
-        let mut in_block = false;
-        let mut is_target_domain = false;
-        
-        for line in content.lines() {
-            if line.trim_start().starts_with("<VirtualHost") {
-                in_block = true;
-                current_block.clear();
-                is_target_domain = false;
-            }
-            
-            if in_block {
-                current_block.push_str(line);
-                current_block.push('\n');
-                
-                if line.contains(&format!("ServerName {}", domain)) {
-                    is_target_domain = true;
-                }
-                
-                if line.trim_start().starts_with("</VirtualHost>") {
-                    in_block = false;
-                    if !is_target_domain {
-                        out_content.push_str(&current_block);
-                    }
-                }
-            } else {
-                out_content.push_str(line);
-                out_content.push('\n');
-            }
-        }
-        
-        let _ = std::fs::write(&vhosts_file, out_content.trim_end());
-        
-        // Remove from hosts file (requires admin) while preserving the file encoding.
-        let _ = sync_hosts_entry(&domain, false);
-        
-        return Ok("SUCCESS".to_string());
+/// Removes hand-written vhosts for `domain` (exact ServerName match) outside the
+/// DevStack SITES block; returns how many were removed. Hosts lines are handled by the hosts
+/// sync, so another site that now owns a similar or equal name is never touched.
+#[tauri::command(async)]
+fn remove_virtual_host(domain: String, vhosts_file: String) -> Result<usize, String> {
+    let _config = crate::site_config::config_lock();
+    let content = fs::read_to_string(&vhosts_file).map_err(|e| format!("Cannot read {vhosts_file}: {e}"))?;
+    // ServerName only: a hand-written vhost that merely aliases the host serves other names too.
+    let (updated, removed) = crate::site_config::remove_vhosts_outside_block(&content, &[domain], false);
+    if removed > 0 {
+        fs::write(&vhosts_file, updated).map_err(|e| format!("Cannot write {vhosts_file}: {e}"))?;
     }
-    Err("Failed to read vhosts file".into())
+    Ok(removed)
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -3451,7 +3474,47 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
-    use super::{check_ports_status, patch_httpd_conf, upsert_mysqld_values};
+    use super::{check_ports_status, patch_httpd_conf, replace_dir, set_ini_value, temp_extract_dir_for, upsert_mysqld_values};
+
+    #[test]
+    fn ini_value_is_set_on_any_line_and_missing_keys_are_reported() {
+        let ini = "[mysqld]\r\nport=3306\r\n  Port = 3307\r\nportable=1\r\n";
+        let out = set_ini_value(ini, "port", "3310").unwrap();
+        assert_eq!(out, "[mysqld]\r\nport=3310\r\n  Port = 3310\r\nportable=1\r\n");
+        assert!(set_ini_value(ini, "socket", "x").is_none());
+        // Regex metacharacters in the key are literal.
+        assert!(set_ini_value("a.b=1\n", "a.b", "2").unwrap().contains("a.b=2"));
+        assert!(set_ini_value("axb=1\n", "a.b", "2").is_none());
+    }
+
+    #[test]
+    fn temp_extract_dir_keeps_the_full_version() {
+        let dir = temp_extract_dir_for(std::path::Path::new(r"F:\devstack\bin\php\php-8.3.30"));
+        assert_eq!(dir, std::path::PathBuf::from(r"F:\devstack\bin\php\php-8.3.30.tmp_extract"));
+    }
+
+    #[test]
+    fn replace_dir_swaps_in_the_new_copy_and_drops_the_old_one() {
+        let root = std::env::temp_dir().join(format!("devstack-replace-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let (src, dest) = (root.join("new"), root.join("php-1.0.0"));
+        std::fs::create_dir_all(&src).unwrap();
+        std::fs::create_dir_all(&dest).unwrap();
+        std::fs::write(src.join("php.exe"), "new").unwrap();
+        std::fs::write(dest.join("php.exe"), "old").unwrap();
+        std::fs::write(src.join("php.ini"), "default").unwrap();
+        std::fs::write(dest.join("php.ini"), "tuned").unwrap();
+
+        replace_dir(&src, &dest, &["php.ini"]).unwrap();
+        assert_eq!(std::fs::read_to_string(dest.join("php.exe")).unwrap(), "new");
+        assert_eq!(std::fs::read_to_string(dest.join("php.ini")).unwrap(), "tuned");
+        assert!(!src.exists() && !root.join("php-1.0.0.old").exists());
+
+        // A missing source fails and leaves the existing install in place.
+        assert!(replace_dir(&root.join("missing"), &dest, &[]).is_err());
+        assert_eq!(std::fs::read_to_string(dest.join("php.exe")).unwrap(), "new");
+        let _ = std::fs::remove_dir_all(&root);
+    }
 
     #[test]
     fn port_check_finds_listener_and_probes_free_ports_in_parallel() {

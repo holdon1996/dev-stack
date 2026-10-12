@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useStore } from '../store';
-import { ExternalLink, Folder, Trash2, Lock, Link, Settings2, Terminal, Play, Square, RotateCcw, AlertTriangle } from 'lucide-react';
+import { ExternalLink, Folder, Trash2, Lock, Link, Unlink, Settings2, Terminal, Play, Square, RotateCcw, AlertTriangle } from 'lucide-react';
 import SiteConfigModal from './SiteConfigModal';
 import { siteProcesses } from '../lib/sites';
 
@@ -207,19 +207,39 @@ const PageSites = () => {
                     <button className="btn-ghost p-1.5" title={t('openFolder')} onClick={() => useStore.getState().openExplorer(site.path)}>
                       <Folder size={14} />
                     </button>
+                    {managed && (
+                      <button
+                        type="button"
+                        className="btn-ghost p-1.5"
+                        title={t('unlinkSite')}
+                        aria-label={t('unlinkSite')}
+                        disabled={siteApplying}
+                        onClick={async () => {
+                          const { confirm } = await import('@tauri-apps/plugin-dialog');
+                          const yes = await confirm(t('unlinkSiteConfirm', { domain: site.domain }), {
+                            title: t('unlinkSite'), kind: 'info', okLabel: t('unlinkSite'), cancelLabel: t('cancel'),
+                          });
+                          if (yes) {
+                            await useStore.getState().unlinkSite(site);
+                            showToast(t('siteUnlinked', { domain: site.domain }), 'ok');
+                          }
+                        }}
+                      >
+                        <Unlink size={14} />
+                      </button>
+                    )}
                     <button
+                      type="button"
                       className="btn-danger p-1.5 border-none"
-                      title={t('remove')}
+                      title={t('deleteProjectFolder')}
+                      aria-label={t('deleteProjectFolder')}
+                      disabled={siteApplying}
                       onClick={async () => {
                         const { confirm } = await import('@tauri-apps/plugin-dialog');
-                        const yes = await confirm(
-                          t('deleteHostConfirm', { domain: site.domain }) + '\n\n' + t('deleteProjectWarning'),
-                          { title: t('deleteProjectTitle'), kind: 'warning' }
-                        );
-                        if (yes) {
-                          await useStore.getState().removeSite(site.id, site.domain, site.path);
-                          showToast(t('hostRemoved'), 'warn');
-                        }
+                        const yes = await confirm(t('deleteProjectFolderConfirm', { path: site.path }), {
+                          title: t('deleteProjectTitle'), kind: 'warning', okLabel: t('deleteProjectFolder'), cancelLabel: t('cancel'),
+                        });
+                        if (yes) await useStore.getState().deleteSiteFolder(site);
                       }}
                     >
                       <Trash2 size={14} />

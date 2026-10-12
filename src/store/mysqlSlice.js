@@ -131,14 +131,25 @@ export const createMysqlSlice = (set, get) => ({
     },
 
     uninstallMysqlVersion: async (version) => {
+        const { t, showToast } = get();
+        const name = `MySQL ${version}`;
+        if (get().mysqlVersions.find(v => v.version === version)?.active) {
+            showToast(t('uninstallActiveBlocked', { name }), 'warn');
+            return false;
+        }
         const devDir = get().settings.devStackDir.replace(/\\/g, '/');
         const destDir = `${devDir}/bin/mysql/mysql-${version}`;
         try {
             const { invoke } = await import('@tauri-apps/api/core');
             await invoke('remove_dir', { path: destDir.replace(/\//g, '\\') });
-        } catch (e) { console.error('Failed to remove MySQL dir:', e); }
+        } catch (e) {
+            showToast(t('uninstallFailed', { name, error: `${e}` }), 'danger');
+            await get().scanInstalledMysql();
+            return false;
+        }
         set(s => ({ mysqlVersions: s.mysqlVersions.map(v => v.version === version ? { ...v, installed: false, active: false } : v) }));
-        get().showToast(`MySQL ${version} uninstalled`, 'warn');
+        showToast(t('uninstalledToast', { name }), 'warn');
+        return true;
     },
 
     setActiveMysql: async (version) => {

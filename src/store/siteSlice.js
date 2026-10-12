@@ -3,7 +3,7 @@ import { getMkcertPath } from '../lib/ssl';
 import { MANIFEST_FILE, buildManifest, envNames, parseManifest, planManifestImport } from '../lib/manifest';
 import {
     assignFcgiPorts, buildVhosts, declaredVitePort, defaultSiteConfig, detectFromFiles, proxyPortsInVhosts, fcgiPorts, findHostConflicts, isValidHost, legacyDomain, usesFcgi,
-    needsHostsEntry, parseHostsOutsideBlock, parseLegacyVhost, requiresHttps, siteHosts, validateSiteConfig,
+    needsHostsEntry, parseHostsOutsideBlock, parseLegacyVhost, requiresHttps, siteHosts, siteProcesses, validateSiteConfig,
 } from '../lib/sites';
 
 const HOSTS_FILE = 'C:\\Windows\\System32\\drivers\\etc\\hosts';
@@ -19,6 +19,8 @@ export const createSiteSlice = (set, get) => ({
     hostsOutside: [],
     hostsUnresolved: [],
     siteApplying: false,
+    /** The www folder could not be read: `sites` is the last known list, hosts sync is paused. */
+    sitesUnavailable: false,
     apacheConfigStale: false,
 
     _patchSiteConfig: (key, patch) => set(s => ({
@@ -299,10 +301,56 @@ export const createSiteSlice = (set, get) => ({
             return { siteConfigs: rest };
         });
         if (!wasManaged) return;
-        // removeSite restarts Apache itself. The hosts lines must go even if the
-        // vhost rewrite fails (no active Apache, httpd -t error).
+        // unlinkSite restarts Apache itself. The hosts lines and the pool must go even if
+        // the vhost rewrite fails (no active Apache, httpd -t error, another apply running).
         const applied = await get().applySites({ legacyHosts: [legacyDomain(key)], restart: false });
-        if (!applied) await get().syncHosts({ legacy: [legacyDomain(key)] });
+        if (!applied) {
+            await get().syncHosts({ legacy: [legacyDomain(key)] });
+            await get().ensureFcgiBackends();
+        }
+    },
+
+    /**
+     * Removes a project from DevStack: stops its processes and drops its vhost, hosts
+     * lines and FastCGI pool. The project files stay on disk.
+     */
+    unlinkSite: async (site) => {
+        const { invoke } = await import('@tauri-apps/api/core');
+        const cfg = get().siteConfigs[site.key];
+        for (const proc of siteProcesses(cfg || {})) await get().stopSiteProcess(site, proc);
+        await get().forgetSite(site.key);
+
+        // A hand-written vhost from before DevStack managed the folder, unless a managed
+        // site now owns that host name.
+        let removedVhosts = 0;
+        const apacheRoot = get()._activeApacheRoot();
+        const claimed = get()._managedSites().some(s => siteHosts(s.cfg).includes(site.legacyDomain));
+        if (site.legacyDomain && !claimed) {
+            if (apacheRoot) {
+                removedVhosts = await invoke('remove_virtual_host', {
+                    domain: site.legacyDomain,
+                    vhostsFile: win(`${apacheRoot}/conf/extra/httpd-vhosts.conf`),
+                }).catch(e => { get().addServiceLog('apache', `${e}`, 'err'); return 0; });
+            }
+            if (!cfg?.managed) await get().syncHosts({ legacy: [site.legacyDomain] });
+        }
+        if ((cfg?.managed || removedVhosts) && get().services.find(s => s.type === 'web')?.status === 'running') {
+            await get().restartApache();
+        }
+    },
+
+    /** Unlinks the project, then deletes its folder from disk (permanently, no Recycle Bin). */
+    deleteSiteFolder: async (site) => {
+        const { invoke } = await import('@tauri-apps/api/core');
+        const { t, showToast } = get();
+        try {
+            await get().unlinkSite(site);
+            await invoke('remove_dir', { path: win(site.path) });
+            showToast(t('projectFolderDeleted', { path: site.path }), 'warn');
+        } catch (e) {
+            showToast(t('projectFolderDeleteFailed', { error: `${e}` }), 'danger');
+        }
+        await get().scanSites();
     },
 
     _refreshSiteDomains: () => set(s => ({
@@ -431,6 +479,13 @@ export const createSiteSlice = (set, get) => ({
     syncHosts: async ({ remove = [], legacy = [] } = {}) => {
         const { invoke } = await import('@tauri-apps/api/core');
         const { t, showToast } = get();
+        if (get().sitesUnavailable) {
+            await get().scanSites(); // the drive may be back
+            if (get().sitesUnavailable) {
+                showToast(t('wwwUnavailable', { path: get().settings.rootPath }), 'warn');
+                return false;
+            }
+        }
         const managed = get()._managedSites();
         const entries = [
             ...managed.flatMap(s => siteHosts(s.cfg)).filter(needsHostsEntry).map(host => ({ ip: '127.0.0.1', host })),
@@ -443,7 +498,8 @@ export const createSiteSlice = (set, get) => ({
                 legacy: [...managed.map(s => legacyDomain(s.key)), ...legacy],
             });
         } catch (e) {
-            showToast(`${e}`, 'danger');
+            showToast(t('hostsWriteFailed', { error: `${e}` }), 'danger');
+            get().addServiceLog('apache', `${e}`, 'err');
             return false;
         }
         const unresolved = await invoke('flush_dns_and_check', {

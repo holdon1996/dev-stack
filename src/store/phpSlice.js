@@ -1,4 +1,5 @@
 import { getPhpDir, getBinDir } from '../lib/paths';
+import { usesFcgi } from '../lib/sites';
 
 export const createPhpSlice = (set, get) => ({
     phpVersions: [
@@ -339,14 +340,31 @@ export const createPhpSlice = (set, get) => ({
     },
 
     uninstallPhpVersion: async (version) => {
+        const { t, showToast } = get();
+        const name = `PHP ${version}`;
+        if (get().phpVersions.find(v => v.version === version)?.active) {
+            showToast(t('uninstallActiveBlocked', { name }), 'warn');
+            return false;
+        }
+        // A site pinned to this version runs php-cgi from its folder: the files are locked.
+        const users = get()._managedSites().filter(s => usesFcgi(s.cfg) && s.cfg.phpVersion === version).map(s => s.key);
+        if (users.length) {
+            showToast(t('uninstallPhpInUse', { version, sites: users.join(', ') }), 'warn');
+            return false;
+        }
         const devDir = get().settings.devStackDir.replace(/\\/g, '/');
         const destDir = `${devDir}/bin/php/php-${version}`;
         try {
             const { invoke } = await import('@tauri-apps/api/core');
             await invoke('remove_dir', { path: destDir.replace(/\//g, '\\') });
-        } catch (e) { console.error('Failed to remove PHP dir:', e); }
+        } catch (e) {
+            showToast(t('uninstallFailed', { name, error: `${e}` }), 'danger');
+            await get().scanInstalledPhp();
+            return false;
+        }
         set(s => ({ phpVersions: s.phpVersions.map(v => v.version === version ? { ...v, installed: false, active: false } : v) }));
-        get().showToast(`PHP ${version} uninstalled`, 'warn');
+        showToast(t('uninstalledToast', { name }), 'warn');
+        return true;
     },
 
     setActivePhp: async (version) => {

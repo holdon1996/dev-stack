@@ -269,39 +269,6 @@ export const createConfigSlice = (set, get) => ({
         { id: 'env', label: '.env', category: 'System', path: '', desc: 'Environment variables', source: null },
     ],
 
-    removeSite: async (id, siteDomain, sitePath) => {
-        try {
-            const { invoke } = await import('@tauri-apps/api/core');
-            const { settings, apacheVersions, sites } = get();
-            const site = sites.find(s => s.id === id);
-            const activeApache = apacheVersions.find(v => v.active)?.version;
-
-            if (site) await get().forgetSite(site.key);
-
-            if (activeApache && site?.legacyDomain) {
-                // Hand-written vhost from before DevStack managed this project, if any.
-                const vhostsFile = `${settings.devStackDir}/bin/apache/apache-${activeApache}/conf/extra/httpd-vhosts.conf`.replace(/\\/g, '\\\\');
-                await invoke('remove_virtual_host', { domain: site.legacyDomain, vhostsFile });
-                // Auto restart apache to clear config
-                get().restartApache();
-            }
-
-            if (sitePath) {
-                try {
-                    await invoke('remove_dir', { path: sitePath.replace(/\\/g, '\\\\') });
-                } catch (e) {
-                    console.error('Failed to remove docroot dir:', e);
-                }
-            }
-
-            set(state => ({ sites: state.sites.filter(s => s.id !== id) }));
-            get().scanSites();
-        } catch (e) {
-            console.error('removeSite error:', e);
-            get().showToast('Error removing site', 'danger');
-        }
-    },
-
     scanSites: async () => {
         try {
             const { invoke } = await import('@tauri-apps/api/core');
@@ -310,6 +277,15 @@ export const createConfigSlice = (set, get) => ({
 
             const rootPath = get().settings.rootPath;
             if (!rootPath) return;
+
+            // An unreachable www (unplugged or network drive) must not look like "no projects":
+            // keep the last list, otherwise the next hosts sync would drop every project host.
+            if (!(await invoke('path_exists', { path: rootPath }))) {
+                if (!get().sitesUnavailable) get().showToast(get().t('wwwUnavailable', { path: rootPath }), 'warn');
+                set({ sitesUnavailable: true });
+                return;
+            }
+            set({ sitesUnavailable: false });
 
             // Native Rust listing is 100x faster and zero-overhead
             const folders = await invoke('list_subdirs', { path: rootPath });
@@ -338,39 +314,42 @@ export const createConfigSlice = (set, get) => ({
                 set({ sites });
             } else { set({ sites: [] }); }
         } catch (e) {
-            console.error('scanSites error:', e);
-            set({ sites: [] });
+            console.error('scanSites error:', e); // keep the last list, see sitesUnavailable above
         }
     },
 
     createProject: async (name) => {
+        const { t, showToast } = get();
         try {
             const { invoke } = await import('@tauri-apps/api/core');
             const rootPath = get().settings.rootPath;
             if (!rootPath) {
-                get().showToast('Root path not configured', 'danger');
+                showToast(t('rootPathMissing'), 'danger');
+                return false;
+            }
+            // A plain folder name: no separators or `..` that would land outside www.
+            if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(name)) {
+                showToast(t('projectNameInvalid'), 'warn');
                 return false;
             }
 
             const projectPath = `${rootPath}/${name}`.replace(/\//g, '\\');
-
-            // Native directory creation
-            const success = await invoke('create_dir', { path: projectPath });
-
-            if (success) {
-                // Create default index.php
-                const indexPath = `${projectPath}\\index.php`;
-                const content = `<?php\n\nphpinfo();\n`;
-                await invoke('write_text_file', { path: indexPath, content });
-
-                get().showToast(`Project "${name}" created`, 'ok');
-                await get().scanSites();
-                return true;
+            if (await invoke('path_exists', { path: projectPath })) {
+                showToast(t('projectExists', { name }), 'warn');
+                return false;
             }
-            return false;
+            if (!(await invoke('create_dir', { path: projectPath }))) {
+                showToast(t('projectCreateFailed', { error: projectPath }), 'danger');
+                return false;
+            }
+
+            await invoke('write_text_file', { path: `${projectPath}\\index.php`, content: `<?php\n\nphpinfo();\n` });
+            showToast(t('projectCreated', { name }), 'ok');
+            await get().scanSites();
+            return true;
         } catch (e) {
             console.error('createProject error:', e);
-            get().showToast(typeof e === 'string' ? e : 'Failed to create project', 'danger');
+            showToast(t('projectCreateFailed', { error: `${e}` }), 'danger');
             return false;
         }
     },

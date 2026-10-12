@@ -11,6 +11,14 @@ use std::process::{Command, Output};
 
 const HOSTS_PATH: &str = "C:\\Windows\\System32\\drivers\\etc\\hosts";
 
+/// Held by every command that rewrites httpd.conf, httpd-vhosts.conf, php.ini or my.ini.
+/// Some of them run on worker threads, so without it a read-modify-write (or the
+/// `httpd -t` rollback in `apply_apache_sites`) could silently undo a concurrent change.
+pub(crate) fn config_lock() -> std::sync::MutexGuard<'static, ()> {
+    static CONFIG_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    CONFIG_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+}
+
 /// `Command` that never flashes a console window.
 pub(crate) fn hidden_command(program: impl AsRef<std::ffi::OsStr>) -> Command {
     let mut command = Command::new(program);
@@ -87,6 +95,7 @@ fn write_if_changed(path: &Path, old: &str, new: &str) -> Result<(), String> {
 
 #[tauri::command]
 pub fn write_managed_block(path: String, name: String, comment: String, body: String) -> Result<(), String> {
+    let _config = crate::site_config::config_lock();
     if !matches!(comment.as_str(), "#" | ";") || !name.chars().all(|c| c.is_ascii_uppercase() || c == ' ') {
         return Err("Invalid managed block".into());
     }
@@ -113,8 +122,8 @@ fn host_tokens(line: &str, directive: &str) -> Option<Vec<String>> {
     )
 }
 
-/// Drops `<VirtualHost>` blocks whose ServerName/ServerAlias is in `names`.
-fn drop_vhosts(text: &str, names: &[String]) -> (String, usize) {
+/// Drops `<VirtualHost>` blocks whose ServerName (or, with `aliases`, a ServerAlias) is in `names`.
+fn drop_vhosts(text: &str, names: &[String], aliases: bool) -> (String, usize) {
     let mut out = String::new();
     let mut block = String::new();
     let mut in_block = false;
@@ -133,7 +142,7 @@ fn drop_vhosts(text: &str, names: &[String]) -> (String, usize) {
             continue;
         }
         block.push_str(line);
-        let hosts = host_tokens(trimmed, "ServerName").or_else(|| host_tokens(trimmed, "ServerAlias"));
+        let hosts = host_tokens(trimmed, "ServerName").or_else(|| aliases.then(|| host_tokens(trimmed, "ServerAlias")).flatten());
         if hosts.is_some_and(|hosts| hosts.iter().any(|h| names.contains(h))) {
             matched = true;
         }
@@ -160,15 +169,15 @@ fn vhost_hosts(text: &str) -> std::collections::BTreeSet<String> {
         .collect()
 }
 
-pub fn remove_vhosts_outside_block(content: &str, names: &[String]) -> (String, usize) {
+pub fn remove_vhosts_outside_block(content: &str, names: &[String], aliases: bool) -> (String, usize) {
     let names: Vec<String> = names.iter().map(|n| n.to_ascii_lowercase()).collect();
     match block_range(content, "SITES", "#") {
         Some((s, e)) => {
-            let (before, a) = drop_vhosts(&content[..s], &names);
-            let (after, b) = drop_vhosts(&content[e..], &names);
+            let (before, a) = drop_vhosts(&content[..s], &names, aliases);
+            let (after, b) = drop_vhosts(&content[e..], &names, aliases);
             (format!("{before}{}{after}", &content[s..e]), a + b)
         }
-        None => drop_vhosts(content, &names),
+        None => drop_vhosts(content, &names, aliases),
     }
 }
 
@@ -260,6 +269,7 @@ pub fn apply_apache_sites(
     vhosts_body: String,
     legacy_names: Vec<String>,
 ) -> Result<ApplyReport, String> {
+    let _config = crate::site_config::config_lock();
     let root = PathBuf::from(&apache_root);
     let httpd_path = root.join("conf").join("httpd.conf");
     let vhosts_path = root.join("conf").join("extra").join("httpd-vhosts.conf");
@@ -278,7 +288,7 @@ pub fn apply_apache_sites(
             .collect();
     }
 
-    let (mut new_vhosts, removed_legacy_vhosts) = remove_vhosts_outside_block(&old_vhosts, &legacy_names);
+    let (mut new_vhosts, removed_legacy_vhosts) = remove_vhosts_outside_block(&old_vhosts, &legacy_names, true);
     let mut removed_manual_ssl = false;
     if wants_ssl {
         if let Some(cleaned) = remove_manual_ssl_region(&new_vhosts) {
@@ -767,6 +777,7 @@ pub fn enable_extension_line(content: &str, ext: &str) -> String {
 
 #[tauri::command(async)]
 pub fn ensure_php_extension(ini_path: String, ext: String) -> Result<(), String> {
+    let _config = crate::site_config::config_lock();
     let path = PathBuf::from(&ini_path);
     let old = fs::read_to_string(&path).map_err(|e| format!("Cannot read {ini_path}: {e}"))?;
     write_if_changed(&path, &old, &enable_extension_line(&old, &ext))
@@ -823,7 +834,7 @@ mod tests {
     #[test]
     fn removes_only_matching_legacy_vhosts_outside_block() {
         let content = "<VirtualHost *:80>\n    ServerName a.test\n</VirtualHost>\n<VirtualHost *:80>\n    ServerName keep.test\n</VirtualHost>\n# --- DEVSTACK SITES ---\n<VirtualHost *:80>\n    ServerName a.test\n</VirtualHost>\n# --- END DEVSTACK SITES ---\n";
-        let (out, removed) = remove_vhosts_outside_block(content, &["A.test".into()]);
+        let (out, removed) = remove_vhosts_outside_block(content, &["A.test".into()], true);
         assert_eq!(removed, 1);
         assert!(out.contains("keep.test"));
         assert_eq!(out.matches("ServerName a.test").count(), 1);
@@ -833,7 +844,7 @@ mod tests {
     #[test]
     fn exact_server_name_match_only() {
         let content = "<VirtualHost *:80>\n    ServerName a.test.local\n</VirtualHost>\n";
-        assert_eq!(remove_vhosts_outside_block(content, &["a.test".into()]).1, 0);
+        assert_eq!(remove_vhosts_outside_block(content, &["a.test".into()], true).1, 0);
     }
 
     #[test]
