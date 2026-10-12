@@ -1,10 +1,14 @@
 import React from 'react';
 import { useStore } from '../store';
+import { useShallow } from 'zustand/react/shallow';
 import packageJson from '../../package.json';
 import { Layout, Globe, Database, Code, FileText, Settings, Radio, FileCode, Server, Boxes, Mail, Globe2, LifeBuoy } from 'lucide-react';
 
 const Sidebar = () => {
-  const { activePage, setActivePage, systemStats, t } = useStore();
+  // `locale` is selected so labels re-render when the language changes (`t` itself is stable).
+  const { activePage, setActivePage, systemStats, t } = useStore(useShallow(s => ({
+    activePage: s.activePage, setActivePage: s.setActivePage, systemStats: s.systemStats, t: s.t, locale: s.locale,
+  })));
   const appVersion = packageJson.version || 'unknown';
 
   const navItems = [

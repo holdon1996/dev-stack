@@ -296,7 +296,7 @@ fn strip_utf8_bom(mut bytes: &[u8]) -> &[u8] {
     bytes
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn get_start_on_boot() -> Result<bool, String> {
     #[cfg(target_os = "windows")]
     {
@@ -325,7 +325,7 @@ fn get_start_on_boot() -> Result<bool, String> {
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn set_start_on_boot(enabled: bool) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
@@ -1246,7 +1246,7 @@ fn remove_dir(path: String) -> Result<(), String> {
 }
 
 /// Uncomment a specific extension in php.ini (e.g., ";extension=curl" -> "extension=curl")
-#[tauri::command]
+#[tauri::command(async)]
 fn enable_php_extension(ini_path: String, ext: String) -> bool {
     let _config = crate::site_config::config_lock();
     let content = match std::fs::read_to_string(&ini_path) {
@@ -1263,7 +1263,7 @@ fn enable_php_extension(ini_path: String, ext: String) -> bool {
     std::fs::write(&ini_path, updated).is_ok()
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn disable_php_extension(ini_path: String, ext: String) -> bool {
     let _config = crate::site_config::config_lock();
     let content = match std::fs::read_to_string(&ini_path) {
@@ -1293,7 +1293,7 @@ fn get_php_ini_extensions(ini_path: String) -> Result<Vec<String>, String> {
 }
 
 /// Enable common PHP extensions in php.ini (uncomments them if commented out)
-#[tauri::command]
+#[tauri::command(async)]
 fn patch_php_ini_extensions(ini_path: String) -> bool {
     let _config = crate::site_config::config_lock();
     let exts = [
@@ -1442,7 +1442,7 @@ fn patch_php_ini_extensions(ini_path: String) -> bool {
     std::fs::write(&ini_path, updated).is_ok()
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn set_php_global_path(base_dir: String, php_dir: String) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
@@ -1698,25 +1698,30 @@ fn is_php_runtime_path_entry(normalized_path: &str) -> bool {
     normalized_path.contains("\\bin\\php\\php-")
 }
 
+/// Tells other programs (Explorer, new terminals) that environment variables changed.
+/// Runs on its own thread: the broadcast waits up to the timeout per unresponsive window,
+/// and nobody needs its result.
 #[cfg(target_os = "windows")]
 fn broadcast_environment_change() {
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         SendMessageTimeoutW, HWND_BROADCAST, SMTO_ABORTIFHUNG, WM_SETTINGCHANGE,
     };
 
-    let message = "Environment\0".encode_utf16().collect::<Vec<u16>>();
-    let mut result = 0usize;
-    unsafe {
-        SendMessageTimeoutW(
-            HWND_BROADCAST,
-            WM_SETTINGCHANGE,
-            0,
-            message.as_ptr() as isize,
-            SMTO_ABORTIFHUNG,
-            5000,
-            &mut result,
-        );
-    }
+    std::thread::spawn(|| {
+        let message = "Environment\0".encode_utf16().collect::<Vec<u16>>();
+        let mut result = 0usize;
+        unsafe {
+            SendMessageTimeoutW(
+                HWND_BROADCAST,
+                WM_SETTINGCHANGE,
+                0,
+                message.as_ptr() as isize,
+                SMTO_ABORTIFHUNG,
+                5000,
+                &mut result,
+            );
+        }
+    });
 }
 
 #[cfg(target_os = "windows")]
@@ -1744,32 +1749,14 @@ fn create_junction(link: &Path, target: &Path) -> Result<(), String> {
     }
 }
 
+/// Removes the `current` junction itself, never its target. `symlink_metadata` also sees a
+/// dangling junction (its version folder was deleted), which `exists()` reports as missing.
 #[cfg(target_os = "windows")]
 fn remove_junction(link: &Path) -> Result<(), String> {
-    use std::os::windows::process::CommandExt;
-    const CREATE_NO_WINDOW: u32 = 0x08000000;
-
-    if !link.exists() {
+    if fs::symlink_metadata(link).is_err() {
         return Ok(());
     }
-
-    let link_str = link.to_string_lossy().replace("/", "\\");
-    let output = Command::new("cmd")
-        .args(["/C", "rmdir", &link_str])
-        .creation_flags(CREATE_NO_WINDOW)
-        .output()
-        .map_err(|e| format!("Failed to remove Node junction: {}", e))?;
-
-    if output.status.success() {
-        Ok(())
-    } else {
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        Err(if stderr.is_empty() {
-            "Failed to remove Node junction".into()
-        } else {
-            stderr
-        })
-    }
+    fs::remove_dir(link).map_err(|e| format!("Failed to remove Node junction {}: {e}", link.display()))
 }
 
 fn detect_active_node_version_internal(base_dir: &str) -> Result<Option<String>, String> {
@@ -1844,7 +1831,7 @@ fn list_node_versions(base_dir: String) -> Result<Vec<NodeVersionState>, String>
     Ok(versions)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn activate_node_version(base_dir: String, version: String) -> Result<String, String> {
     #[cfg(target_os = "windows")]
     {
@@ -1871,7 +1858,7 @@ fn activate_node_version(base_dir: String, version: String) -> Result<String, St
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn deactivate_node_version(base_dir: String) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
@@ -1893,7 +1880,7 @@ struct NodePathStatus {
     user_path_contains_devstack: bool,
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn get_node_path_status(base_dir: String) -> Result<NodePathStatus, String> {
     #[cfg(target_os = "windows")]
     {
@@ -1932,7 +1919,7 @@ fn get_node_path_status(base_dir: String) -> Result<NodePathStatus, String> {
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn set_node_global_path(base_dir: String) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
@@ -2036,7 +2023,7 @@ fn open_main_devtools(app: tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn update_ini_value(file_path: String, key: String, value: String) -> bool {
     let _config = crate::site_config::config_lock();
     let Ok(content) = fs::read_to_string(&file_path) else { return false };
@@ -2213,7 +2200,7 @@ fn patch_httpd_conf(raw: &str, sr: &str, dr: &str, port: u16) -> String {
     content
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn patch_apache_paths(new_server_root: String, new_doc_root: String, port: Option<u16>) -> Result<String, String> {
     let _config = crate::site_config::config_lock();
     use std::fs;
@@ -2324,7 +2311,7 @@ fn upsert_mysqld_values(content: &str, forced: &[(&str, String)], defaults: &[(&
     lines.concat()
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn patch_mysql_paths(ini_path: String, new_mysql_root: String, port: Option<u16>) -> Result<String, String> {
     let _config = crate::site_config::config_lock();
     use std::fs;
@@ -2581,6 +2568,17 @@ fn get_system_stats(state: tauri::State<'_, AppState>) -> serde_json::Value {
     })
 }
 
+/// HTTP client for large downloads: no overall deadline (a 250 MB MySQL zip on a slow line
+/// is fine), but a stalled connection fails instead of leaving the install spinner running.
+pub(crate) fn download_client() -> Result<reqwest::Client, String> {
+    reqwest::Client::builder()
+        .user_agent("DevStack/1.0")
+        .connect_timeout(std::time::Duration::from_secs(15))
+        .read_timeout(std::time::Duration::from_secs(60))
+        .build()
+        .map_err(|e| e.to_string())
+}
+
 /// Extraction folder next to `dest`, named after the full folder name: `php-8.3.30` ->
 /// `php-8.3.30.tmp_extract` (`with_extension` would give every 8.3.x the same `php-8.3.tmp_extract`).
 fn temp_extract_dir_for(dest: &Path) -> std::path::PathBuf {
@@ -2659,7 +2657,7 @@ async fn install_binary(
 
     emit_log(&format!("Starting download for {} {}...", svc_type, version));
     
-    let client = reqwest::Client::new();
+    let client = download_client()?;
     let mut download_urls = vec![url.clone()];
     if url.contains("downloads.php.net/~windows/releases/php-") {
         download_urls.push(url.replace(
@@ -2856,11 +2854,7 @@ async fn install_binary(
 async fn download_file(url: String, dest_path: String) -> Result<(), String> {
     use futures_util::StreamExt;
 
-    let client = reqwest::Client::builder()
-        .user_agent("DevStack/1.0")
-        .timeout(std::time::Duration::from_secs(60))
-        .build()
-        .map_err(|e| e.to_string())?;
+    let client = download_client()?;
 
     let res = client.get(&url).send().await.map_err(|e| e.to_string())?;
     if !res.status().is_success() {
@@ -2900,11 +2894,7 @@ async fn download_file_with_progress(
     emit_log(&format!("Download URL: {}", url));
     emit_log(&format!("Starting direct download for {}...", label));
 
-    let client = reqwest::Client::builder()
-        .user_agent("DevStack/1.0")
-        .timeout(std::time::Duration::from_secs(180))
-        .build()
-        .map_err(|e| e.to_string())?;
+    let client = download_client()?;
 
     let res = client.get(&url).send().await.map_err(|e| e.to_string())?;
     if !res.status().is_success() {
@@ -3208,17 +3198,31 @@ async fn open_file_default(path: String, editor: Option<String>, admin: bool) ->
 }
 
 
-#[tauri::command]
+#[tauri::command(async)]
 fn read_file_tail(path: String, lines: usize) -> Result<String, String> {
-    use std::io::{BufRead, BufReader};
-    use std::fs::File;
+    use std::io::{Seek, SeekFrom};
 
-    let file = File::open(&path).map_err(|e| e.to_string())?;
-    let reader = BufReader::new(file);
-    
-    let content: Vec<String> = reader.lines().filter_map(|l| l.ok()).collect();
-    let start = if content.len() > lines { content.len() - lines } else { 0 };
-    Ok(content[start..].join("\n"))
+    // Read only the end of the file (logs reach hundreds of MB), doubling the window
+    // until it holds `lines` complete lines or covers the whole file.
+    let mut file = fs::File::open(&path).map_err(|e| e.to_string())?;
+    let len = file.metadata().map_err(|e| e.to_string())?.len();
+    let mut window: u64 = 64 * 1024;
+    loop {
+        let start = len.saturating_sub(window);
+        file.seek(SeekFrom::Start(start)).map_err(|e| e.to_string())?;
+        let mut buf = Vec::with_capacity((len - start) as usize);
+        (&mut file).take(len - start).read_to_end(&mut buf).map_err(|e| e.to_string())?;
+        let text = String::from_utf8_lossy(&buf);
+        let mut all: Vec<&str> = text.lines().collect();
+        if start == 0 || all.len() > lines {
+            if start > 0 {
+                all.remove(0); // first line is cut by the window
+            }
+            let from = all.len().saturating_sub(lines);
+            return Ok(all[from..].join("\n"));
+        }
+        window *= 2;
+    }
 }
 
 fn log_streams() -> &'static Mutex<std::collections::HashMap<String, u64>> {
@@ -3485,6 +3489,19 @@ mod tests {
         // Regex metacharacters in the key are literal.
         assert!(set_ini_value("a.b=1\n", "a.b", "2").unwrap().contains("a.b=2"));
         assert!(set_ini_value("axb=1\n", "a.b", "2").is_none());
+    }
+
+    #[test]
+    fn file_tail_returns_the_last_lines_of_a_large_file() {
+        let path = std::env::temp_dir().join(format!("devstack-tail-{}.log", std::process::id()));
+        let body: String = (0..20_000).map(|i| format!("line {i} {}\r\n", "x".repeat(20))).collect();
+        std::fs::write(&path, body).unwrap();
+        let tail = super::read_file_tail(path.to_string_lossy().into_owned(), 3).unwrap();
+        assert_eq!(tail.lines().map(|l| l.split(' ').nth(1).unwrap()).collect::<Vec<_>>(), ["19997", "19998", "19999"]);
+        // Fewer lines than asked: the whole file.
+        std::fs::write(&path, "a\nb\n").unwrap();
+        assert_eq!(super::read_file_tail(path.to_string_lossy().into_owned(), 10).unwrap(), "a\nb");
+        let _ = std::fs::remove_file(&path);
     }
 
     #[test]

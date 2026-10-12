@@ -1,5 +1,6 @@
 import React, { useEffect } from 'react';
 import { useStore } from './store';
+import { useShallow } from 'zustand/react/shallow';
 import Sidebar from './components/Sidebar';
 import PageServices from './components/PageServices';
 import PageSites from './components/PageSites';
@@ -25,7 +26,10 @@ import { useSystemStats } from './hooks/useSystemStats';
 const appWindow = getCurrentWindow();
 
 function App() {
-  const { activePage, initApp, recordAppIssue, checkAppUpdate } = useStore();
+  // Subscribe to the page only: the whole store changes on every poll, stats tick and log line.
+  const { activePage, initApp, recordAppIssue, checkAppUpdate } = useStore(useShallow(s => ({
+    activePage: s.activePage, initApp: s.initApp, recordAppIssue: s.recordAppIssue, checkAppUpdate: s.checkAppUpdate,
+  })));
 
   useServicePoll();
   useSystemStats();

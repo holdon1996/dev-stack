@@ -93,7 +93,7 @@ fn write_if_changed(path: &Path, old: &str, new: &str) -> Result<(), String> {
     fs::write(path, new).map_err(|e| format!("Cannot write {}: {e}", path.display()))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn write_managed_block(path: String, name: String, comment: String, body: String) -> Result<(), String> {
     let _config = crate::site_config::config_lock();
     if !matches!(comment.as_str(), "#" | ";") || !name.chars().all(|c| c.is_ascii_uppercase() || c == ' ') {
@@ -541,7 +541,7 @@ pub fn flush_dns_and_check(domains: Vec<String>) -> Vec<String> {
 }
 
 /// Sets (or removes, when `value` is empty) a user environment variable.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn set_user_env(name: String, value: String) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
@@ -789,7 +789,9 @@ pub async fn install_php_ext_from_zip(url: String, ext_dir: String, dll_name: St
     if dll_name.contains(['/', '\\', ':']) || !dll_name.to_ascii_lowercase().ends_with(".dll") {
         return Err(format!("Invalid extension file name: {dll_name}"));
     }
-    let bytes = reqwest::get(&url)
+    let bytes = crate::download_client()?
+        .get(&url)
+        .send()
         .await
         .and_then(|r| r.error_for_status())
         .map_err(|e| format!("Download failed: {e}"))?

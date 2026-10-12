@@ -15,39 +15,49 @@ export function useServicePoll() {
     const timerRef = useRef(null);
 
     useEffect(() => {
+        let cancelled = false;
+        // A poll is in flight: the visibility handler must not start a second loop.
+        let busy = false;
+        const schedule = (ms) => {
+            clearTimeout(timerRef.current);
+            if (!cancelled) timerRef.current = setTimeout(runPoll, ms);
+        };
+
         const runPoll = async () => {
             if (document.visibilityState !== 'visible') {
-                timerRef.current = setTimeout(runPoll, 5000);
+                schedule(5000);
                 return;
             }
 
-            await checkServices();
-            await useStore.getState().checkApacheConfigStale();
+            busy = true;
+            try {
+                await checkServices();
+                await useStore.getState().checkApacheConfigStale();
+            } finally {
+                busy = false;
+            }
 
             // Read services AFTER the check to determine next interval
             const services = useStore.getState().services;
             const isTransitioning = services.some(s =>
                 s.status === 'starting' || s.status === 'stopping'
             );
-            const nextInterval = isTransitioning ? 2000 : 10000;
-            timerRef.current = setTimeout(runPoll, nextInterval);
+            schedule(isTransitioning ? 2000 : 10000);
         };
 
         // Initial delay before first poll to let the app render first
-        timerRef.current = setTimeout(runPoll, 1000);
+        schedule(1000);
 
         const handleVisibility = () => {
-            if (document.visibilityState === 'visible') {
-                // Clear any existing timer and do an immediate check
-                if (timerRef.current) clearTimeout(timerRef.current);
-                timerRef.current = setTimeout(runPoll, 500);
-            }
+            // Check right away when the window comes back, unless a check is running.
+            if (document.visibilityState === 'visible' && !busy) schedule(500);
         };
 
         document.addEventListener('visibilitychange', handleVisibility);
 
         return () => {
-            if (timerRef.current) clearTimeout(timerRef.current);
+            cancelled = true;
+            clearTimeout(timerRef.current);
             document.removeEventListener('visibilitychange', handleVisibility);
         };
     }, [checkServices]); // NO `services` here — that causes infinite loop!

@@ -21,17 +21,29 @@ export const createProcessSlice = (set, get) => ({
         if (procListeners) return;
         const { listen } = await import('@tauri-apps/api/event');
         const { invoke } = await import('@tauri-apps/api/core');
+        // A dev server prints many lines per second: buffer them and update the store (which
+        // re-renders subscribers and persists to localStorage) at most every 150 ms.
+        let pending = {};
+        let flushTimer = null;
+        const flush = () => {
+            flushTimer = null;
+            const batch = pending;
+            pending = {};
+            set(s => {
+                const procLogs = { ...s.procLogs };
+                for (const [id, lines] of Object.entries(batch)) procLogs[id] = [...(procLogs[id] || []), ...lines].slice(-400);
+                return { procLogs };
+            });
+        };
         procListeners = [
-            await listen('proc-log', ({ payload }) => set(s => ({
-                procLogs: {
-                    ...s.procLogs,
-                    [payload.id]: [...(s.procLogs[payload.id] || []), {
-                        t: new Date().toLocaleTimeString(),
-                        m: stripAnsi(payload.line),
-                        l: payload.stream === 'stderr' ? 'warn' : 'info',
-                    }].slice(-400),
-                },
-            }))),
+            await listen('proc-log', ({ payload }) => {
+                (pending[payload.id] ||= []).push({
+                    t: new Date().toLocaleTimeString(),
+                    m: stripAnsi(payload.line),
+                    l: payload.stream === 'stderr' ? 'warn' : 'info',
+                });
+                flushTimer ||= setTimeout(flush, 150);
+            }),
             await listen('proc-state', ({ payload }) => set(s => ({
                 procs: { ...s.procs, [payload.id]: { running: payload.running, pid: payload.pid, command: payload.command, code: payload.code } },
             }))),

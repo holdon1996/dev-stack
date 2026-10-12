@@ -223,13 +223,22 @@ export const createServiceSlice = (set, get) => ({
     /** Name, PID, exe and Windows service of the program holding a stopped service's port. */
     _refreshPortOwners: async () => {
         const { invoke } = await import('@tauri-apps/api/core');
-        const owners = {};
-        for (const svc of get().services) {
-            if (svc.portConflict && svc.status !== 'running' && parseInt(svc.port)) {
-                owners[svc.id] = await invoke('port_owner', { port: parseInt(svc.port) }).catch(() => null);
-            }
-        }
-        set(s => ({ services: s.services.map(svc => ({ ...svc, portOwner: owners[svc.id] || null })) }));
+        // port_owner runs `tasklist`: look an owner up once when a conflict appears (or the
+        // port changes), not on every poll. Services the user runs externally need none.
+        const lookups = get().services
+            .filter(svc => svc.portConflict && svc.status !== 'running' && parseInt(svc.port) && !svc.useExternal)
+            .filter(svc => svc.portOwner?.port !== parseInt(svc.port))
+            .map(async svc => {
+                const owner = await invoke('port_owner', { port: parseInt(svc.port) }).catch(() => null);
+                return [svc.id, owner && { ...owner, port: parseInt(svc.port) }];
+            });
+        const owners = Object.fromEntries(await Promise.all(lookups));
+        set(s => ({
+            services: s.services.map(svc => {
+                if (!svc.portConflict || svc.status === 'running') return svc.portOwner ? { ...svc, portOwner: null } : svc;
+                return svc.id in owners ? { ...svc, portOwner: owners[svc.id] || null } : svc;
+            }),
+        }));
     },
 
     /** The non-DevStack process listening on one of the service's ports, if any. */
@@ -574,17 +583,21 @@ export const createServiceSlice = (set, get) => ({
             })
         }));
 
-        // Initial checks and scans
-        await get().detectElevation?.();
-        await get().syncStartOnBootSetting?.();
+        // Independent scans run together; each updates its own part of the store, and one
+        // failing scan must not stop the rest of startup.
+        await Promise.allSettled([
+            get().detectElevation?.(),
+            get().syncStartOnBootSetting?.(),
+            get().scanInstalledApache(),
+            get().scanInstalledPhp(),
+            get().scanInstalledMysql(),
+            get().scanInstalledNode?.(),
+            get().resolveRedis(),
+            get().scanSites(),
+            get().initProcesses(),
+        ]);
+        // Needs the versions, sites and processes found above.
         await get().checkServicesRunning();
-        await get().scanInstalledApache();
-        await get().scanInstalledPhp();
-        await get().scanInstalledMysql();
-        await get().scanInstalledNode?.();
-        await get().resolveRedis();
-        await get().scanSites();
-        await get().initProcesses();
         await get()._adoptFcgiPoolsAfterRestart();
         await get().ensurePhpCaConfig();
         get().loadHostsFile();

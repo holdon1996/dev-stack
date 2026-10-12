@@ -1,5 +1,6 @@
 import React from 'react';
 import { useStore } from '../store';
+import { useShallow } from 'zustand/react/shallow';
 import { Check, AlertTriangle, X, Info, ArrowRight } from 'lucide-react';
 
 const icons = {
@@ -11,7 +12,9 @@ const icons = {
 };
 
 const Toast = () => {
-  const { toast, setActivePage, openGuide } = useStore();
+  const { toast, setActivePage, openGuide } = useStore(useShallow(s => ({
+    toast: s.toast, setActivePage: s.setActivePage, openGuide: s.openGuide,
+  })));
 
   if (!toast.show) return null;
 

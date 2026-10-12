@@ -180,7 +180,7 @@ pub fn cloudflare_is_authenticated() -> Result<bool, String> {
     Ok(cloudflare_dir()?.join("cert.pem").is_file())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn cloudflare_login(executable: String) -> Result<String, String> {
     std::fs::create_dir_all(cloudflare_dir()?).map_err(|error| error.to_string())?;
     let output = run_cloudflared(&executable, &["tunnel", "login"])?;
