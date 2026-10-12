@@ -121,8 +121,8 @@ const DatabaseTools = () => {
                       <div className="h-1 bg-border rounded-full overflow-hidden">
                         <div className={`h-full ${item.status === 'error' ? 'bg-danger' : 'bg-accent'}`} style={{ width: `${item.status === 'error' ? 100 : item.pct || 0}%` }} />
                       </div>
-                      {item.error && <pre className="text-[10px] text-danger whitespace-pre-wrap mt-1 m-0">{item.error}</pre>}
-                      {item.status === 'done' && <span className="text-[10px] text-accent">✓ {t('dbImportItemDone')}</span>}
+                      {item.error && <pre className="text-[11px] text-danger whitespace-pre-wrap mt-1 m-0">{item.error}</pre>}
+                      {item.status === 'done' && <span className="text-[11px] text-accent">✓ {t('dbImportItemDone')}</span>}
                     </div>
                   )}
                 </div>

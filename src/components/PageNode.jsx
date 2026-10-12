@@ -38,14 +38,14 @@ const PageNode = () => {
     <div className="flex-1 flex flex-col overflow-hidden">
       <div className="px-6 py-5 border-b border-border/40 shadow-sm bg-bg flex items-center gap-4 z-10 relative">
         <div className="flex-1">
-          <h1 className="text-[18px] font-extrabold m-0">{t('nodeTitle')}</h1>
+          <h1 className="text-[20px] font-extrabold m-0">{t('nodeTitle')}</h1>
           <p className="text-[12px] text-muted m-0 mt-1 font-mono">{t('nodeDesc')}</p>
         </div>
 
         <div className="flex items-center gap-2 bg-surface border border-border/50 shadow-liquid rounded-2xl px-4 py-2.5 transition-all duration-300 ease-liquid">
           <Boxes size={14} className="text-accent" />
           <div>
-            <div className="text-[10px] text-muted font-bold tracking-wider uppercase">{t('currentNode')}</div>
+            <div className="text-[11px] text-muted font-bold tracking-wider uppercase">{t('currentNode')}</div>
             <div className="text-[14px] font-bold font-mono text-accent">
               {activeNode ? `v${activeNode.version}` : '—'}
             </div>
@@ -122,7 +122,7 @@ const PageNode = () => {
           <div className="flex items-center justify-between mb-3">
             <div>
               <div className="text-[11px] font-bold text-muted tracking-[0.08em] uppercase">{t('nodeVersionsTitle')}</div>
-              <div className="text-[10px] text-muted font-mono mt-0.5">📁 {settings.devStackDir}/bin/node</div>
+              <div className="text-[11px] text-muted font-mono mt-0.5">📁 {settings.devStackDir}/bin/node</div>
             </div>
           </div>
 
@@ -149,7 +149,7 @@ const PageNode = () => {
                     <div className="flex justify-between items-start mb-3 gap-3">
                       <div className="flex flex-col">
                         <div className="text-[16px] font-bold font-mono tracking-tight">Node {node.version}</div>
-                        <div className="text-[10px] text-muted font-mono mt-0.5 uppercase tracking-wider">
+                        <div className="text-[11px] text-muted font-mono mt-0.5 uppercase tracking-wider">
                           {isActive ? t('nodeCurrentAlias') : isInstalling ? t('downloading') : isInstalled ? t('installed') : t('available')}
                         </div>
                       </div>
@@ -159,15 +159,15 @@ const PageNode = () => {
                           {t('active')}
                         </div>
                       ) : isInstalling ? (
-                        <div className="tag tag-version px-2 py-0.5 text-[10px] uppercase font-bold">
+                        <div className="tag tag-version px-2 py-0.5 text-[11px] uppercase font-bold">
                           {t('downloading')}
                         </div>
                       ) : isInstalled ? (
-                        <div className="tag tag-version px-2 py-0.5 text-[10px] uppercase font-bold">
+                        <div className="tag tag-version px-2 py-0.5 text-[11px] uppercase font-bold">
                           {t('installed')}
                         </div>
                       ) : (
-                        <div className="tag tag-version px-2 py-0.5 text-[10px] uppercase font-bold">
+                        <div className="tag tag-version px-2 py-0.5 text-[11px] uppercase font-bold">
                           {t('available')}
                         </div>
                       )}
@@ -234,7 +234,7 @@ const PageNode = () => {
                 <span className="text-[11px] font-bold text-muted uppercase tracking-wider ml-2">{t('nodeInstallOutput')}</span>
               </div>
               <button
-                className="text-[10px] text-muted hover:text-textDim uppercase font-bold"
+                className="text-[11px] text-muted hover:text-textDim uppercase font-bold"
                 onClick={() => useStore.setState({ nodeInstallLogs: [] })}
               >
                 {t('clearLog')}
@@ -255,7 +255,7 @@ const PageNode = () => {
                     style={{ width: `${nodeInstallProgress.pct || 5}%` }}
                   />
                 </div>
-                <div className="text-right text-[10px] text-muted mt-1">
+                <div className="text-right text-[11px] text-muted mt-1">
                   {nodeInstallProgress.total > 0 ? `${nodeInstallProgress.pct}%` : t('mbDownloaded', { downloaded: nodeInstallProgress.downloaded })}
                 </div>
               </div>

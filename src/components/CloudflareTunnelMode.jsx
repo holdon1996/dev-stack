@@ -74,7 +74,7 @@ const CloudflareTunnelMode = ({ disabled, isInstalled }) => {
               disabled={disabled}
               spellCheck={false}
             />
-            <span className="text-[10px] text-muted">{t('cloudflareTunnelNameHint')}</span>
+            <span className="text-[11px] text-muted">{t('cloudflareTunnelNameHint')}</span>
           </div>
 
           <div className="flex flex-col gap-1.5">
@@ -95,7 +95,7 @@ const CloudflareTunnelMode = ({ disabled, isInstalled }) => {
             <datalist id="cloudflare-hostname-suggestions">
               {hostnameSuggestions.map(h => <option key={h} value={h} />)}
             </datalist>
-            <span className="text-[10px] text-muted">{t('customDomainHint')}</span>
+            <span className="text-[11px] text-muted">{t('customDomainHint')}</span>
           </div>
 
           {isInstalled && cloudflareAuthStatus !== 'connected' ? (

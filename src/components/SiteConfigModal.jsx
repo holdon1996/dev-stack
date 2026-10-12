@@ -11,7 +11,7 @@ const Field = ({ label, htmlFor, hint, help, children }) => (
       {help && <HelpTip textKey={help.key} anchor={help.anchor} />}
     </span>
     {children}
-    {hint && <span className="text-[10px] text-muted">{hint}</span>}
+    {hint && <span className="text-[11px] text-muted">{hint}</span>}
   </div>
 );
 
@@ -166,7 +166,7 @@ const SiteConfigModal = ({ site, onClose }) => {
             {draft.type === 'laravel' && (
               <label className="flex items-start gap-2 mt-3 text-[12px] cursor-pointer">
                 <input type="checkbox" className="mt-0.5" checked={draft.nginxRewrite !== false} onChange={e => update({ nginxRewrite: e.target.checked })} />
-                <span>{t('nginxRewrite')}<span className="block text-[10px] text-muted">{t('nginxRewriteHint')}</span></span>
+                <span>{t('nginxRewrite')}<span className="block text-[11px] text-muted">{t('nginxRewriteHint')}</span></span>
               </label>
             )}
           </Section>
@@ -288,7 +288,7 @@ const SiteConfigModal = ({ site, onClose }) => {
                   </button>
                 ))}
               </div>
-              <span className="text-[10px] text-muted">{t('processesHint')}</span>
+              <span className="text-[11px] text-muted">{t('processesHint')}</span>
             </div>
           </Section>
         </div>

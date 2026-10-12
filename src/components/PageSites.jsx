@@ -79,7 +79,7 @@ const PageSites = () => {
     <div className="flex-1 flex flex-col overflow-hidden">
       <div className="px-6 py-5 border-b border-[#1a1c22] flex items-center bg-bg gap-3">
         <div className="flex-1">
-          <h1 className="text-[18px] font-extrabold m-0">{t('vhostsTitle')}</h1>
+          <h1 className="text-[20px] font-extrabold m-0">{t('vhostsTitle')}</h1>
           <p className="text-[12px] text-muted m-0 mt-1 font-mono">{t('vhostsDesc')}</p>
         </div>
         <ConfigStaleBadge />
@@ -172,14 +172,14 @@ const PageSites = () => {
                       {site.ssl ? 'https' : 'http'}://{site.domain} <ExternalLink size={12} className="shrink-0" />
                     </div>
                     {managed && cfg.aliases?.length > 0 && (
-                      <div className="text-[10px] text-muted font-mono truncate">{cfg.aliases.join(', ')}</div>
+                      <div className="text-[11px] text-muted font-mono truncate">{cfg.aliases.join(', ')}</div>
                     )}
-                    {managed && cfg.group && <div className="text-[10px] text-textDim">{cfg.group}</div>}
+                    {managed && cfg.group && <div className="text-[11px] text-textDim">{cfg.group}</div>}
                   </div>
                   <div>
                     {managed
-                      ? <span className="tag font-mono text-[10px]">{cfg.type}{cfg.type === 'proxy' ? `:${cfg.proxyPort}` : ''}</span>
-                      : <span className="text-[10px] text-muted">{t('notManaged')}</span>}
+                      ? <span className="tag font-mono text-[11px]">{cfg.type}{cfg.type === 'proxy' ? `:${cfg.proxyPort}` : ''}</span>
+                      : <span className="text-[11px] text-muted">{t('notManaged')}</span>}
                   </div>
                   <div className="text-[12px] text-muted font-mono truncate" title={site.path}>
                     {site.path}{managed && cfg.docRoot ? <span className="text-textDim">/{cfg.docRoot}</span> : null}

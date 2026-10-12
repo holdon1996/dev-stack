@@ -42,7 +42,7 @@ const PageApache = () => {
       {/* Header */}
       <div className="px-6 py-5 border-b border-[#1a1c22] bg-bg flex items-center justify-between">
         <div className="flex-1">
-          <h1 className="text-[18px] font-extrabold tracking-tight m-0 text-text">{t('apacheTitle')}</h1>
+          <h1 className="text-[20px] font-extrabold tracking-tight m-0 text-text">{t('apacheTitle')}</h1>
           <p className="text-[12px] text-muted m-0 mt-1 font-mono">
             {t('apacheDesc')}
           </p>
@@ -54,7 +54,7 @@ const PageApache = () => {
             <div className="flex items-center gap-2 bg-surface border border-border rounded-lg px-3 py-2">
               <div className={`w-2 h-2 rounded-full ${isApacheRunning ? 'bg-accent animate-pulse' : 'bg-muted'}`} />
               <div className="flex flex-col">
-                <span className="text-[10px] text-muted font-bold tracking-wider uppercase">
+                <span className="text-[11px] text-muted font-bold tracking-wider uppercase">
                   {isApacheRunning ? t('runningState') : t('activeState')}
                 </span>
                 <span className="text-[13px] font-bold font-mono text-accent">
@@ -66,7 +66,7 @@ const PageApache = () => {
           {activePhp && (
             <div className="flex items-center gap-2 bg-surface border border-border rounded-lg px-3 py-2">
               <div className="flex flex-col">
-                <span className="text-[10px] text-muted font-bold tracking-wider uppercase">{t('phpModule')}</span>
+                <span className="text-[11px] text-muted font-bold tracking-wider uppercase">{t('phpModule')}</span>
                 <span className="text-[13px] font-bold font-mono text-info">
                   PHP {activePhp.version}
                 </span>
@@ -84,7 +84,7 @@ const PageApache = () => {
             <div>
               <div className="text-[11px] font-bold text-muted tracking-[0.08em] uppercase">{t('apacheVersionsTitle')}</div>
               <div
-                className="text-[10px] text-muted font-mono mt-0.5 cursor-pointer hover:text-accent transition-colors flex items-center gap-1"
+                className="text-[11px] text-muted font-mono mt-0.5 cursor-pointer hover:text-accent transition-colors flex items-center gap-1"
                 onClick={() => useStore.getState().openExplorer(`${settings.devStackDir}/bin/apache/`)}
                 title={t('openInExplorer')}
               >
@@ -126,18 +126,18 @@ const PageApache = () => {
                 <div className="flex items-start justify-between mb-3 mt-0.5">
                   <div>
                     <div className="text-[16px] font-bold font-mono">Apache {v.version}</div>
-                    <div className="text-[10px] text-muted font-mono mt-0.5 uppercase tracking-wider flex items-center gap-1.5">
+                    <div className="text-[11px] text-muted font-mono mt-0.5 uppercase tracking-wider flex items-center gap-1.5">
                       Windows x64 / {v.vsRuntime || (parseInt(v.version.split('.')[2]) >= 65 ? 'VS18' : 'VS17')}
-                      {v.label && <span className="text-[9px] bg-accent/10 text-accent px-1.5 py-0.5 rounded border border-accent/20 normal-case tracking-normal font-sans font-bold">{v.label}</span>}
+                      {v.label && <span className="text-[11px] bg-accent/10 text-accent px-1.5 py-0.5 rounded border border-accent/20 normal-case tracking-normal font-sans font-bold">{v.label}</span>}
                     </div>
                   </div>
                   {v.installed ? (
-                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${v.active ? 'bg-accent/15 text-accent' : 'bg-border text-textDim'
+                    <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${v.active ? 'bg-accent/15 text-accent' : 'bg-border text-textDim'
                       }`}>
                       {v.active ? `● ${t('activeState')}` : t('installedState')}
                     </span>
                   ) : (
-                    <span className="text-[10px] text-muted font-bold opacity-50 tracking-widest uppercase">
+                    <span className="text-[11px] text-muted font-bold opacity-50 tracking-widest uppercase">
                       {t('availableState')}
                     </span>
                   )}
@@ -219,12 +219,12 @@ const PageApache = () => {
                     <div className="w-2.5 h-2.5 rounded-full bg-[#febc2e]" />
                     <div className="w-2.5 h-2.5 rounded-full bg-[#28c840]" />
                   </div>
-                  <span className="text-[10px] font-bold text-muted uppercase tracking-wider ml-1">
+                  <span className="text-[11px] font-bold text-muted uppercase tracking-wider ml-1">
                     {t('installationOutput')}
                   </span>
                 </div>
                 <button
-                  className="text-[10px] text-muted hover:text-textDim uppercase font-bold"
+                  className="text-[11px] text-muted hover:text-textDim uppercase font-bold"
                   onClick={() => useStore.setState({ apacheInstallLogs: [] })}
                 >
                   {t('clearLog')}
@@ -248,7 +248,7 @@ const PageApache = () => {
                         style={{ width: `${pct}%` }}
                       />
                     </div>
-                    <div className="text-right text-[10px] text-muted mt-1">{pct}%</div>
+                    <div className="text-right text-[11px] text-muted mt-1">{pct}%</div>
                   </div>
                 );
               })()}
@@ -279,7 +279,7 @@ const PageApache = () => {
             </div>
             <div className="grid grid-cols-2 gap-3 text-[12px]">
               <div className="flex flex-col gap-1">
-                <span className="text-muted text-[10px] uppercase font-bold">{t('documentRoot')}</span>
+                <span className="text-muted text-[11px] uppercase font-bold">{t('documentRoot')}</span>
                 <span
                   className="font-mono text-accent cursor-pointer hover:underline"
                   onClick={() => useStore.getState().openExplorer(settings.rootPath)}
@@ -288,7 +288,7 @@ const PageApache = () => {
                 </span>
               </div>
               <div className="flex flex-col gap-1">
-                <span className="text-muted text-[10px] uppercase font-bold">{t('configFile')}</span>
+                <span className="text-muted text-[11px] uppercase font-bold">{t('configFile')}</span>
                 <span
                   className="font-mono text-textDim cursor-pointer hover:text-accent transition-colors"
                   onClick={() => openConfigFile('httpd_conf')}
@@ -297,13 +297,13 @@ const PageApache = () => {
                 </span>
               </div>
               <div className="flex flex-col gap-1">
-                <span className="text-muted text-[10px] uppercase font-bold">{t('phpModule')}</span>
+                <span className="text-muted text-[11px] uppercase font-bold">{t('phpModule')}</span>
                 <span className="font-mono text-info">
                   {activePhp ? `php${activePhp.version.split('.')[0]}apache2_4.dll` : t('notConfigured')}
                 </span>
               </div>
               <div className="flex flex-col gap-1">
-                <span className="text-muted text-[10px] uppercase font-bold">{t('port')}</span>
+                <span className="text-muted text-[11px] uppercase font-bold">{t('port')}</span>
                 <span className="font-mono text-textDim">80</span>
               </div>
             </div>

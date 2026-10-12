@@ -87,7 +87,7 @@ const PageTunnels = () => {
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
       <div className="px-6 py-5 border-b border-[#1a1c22] bg-bg">
-        <h1 className="text-[18px] font-extrabold m-0 flex items-center gap-2">
+        <h1 className="text-[20px] font-extrabold m-0 flex items-center gap-2">
           <Radio size={20} className="text-accent" /> {t('tunnelsTitle')}
         </h1>
         <p className="text-[12px] text-muted m-0 mt-1 font-mono">{t('tunnelsDesc')}</p>
@@ -112,9 +112,9 @@ const PageTunnels = () => {
               <div className="flex items-center justify-between mb-1.5 mt-1">
                 <span className="text-[15px] font-bold">{p.name}</span>
                 {tunnelInstalled[p.id] ? (
-                  <span className="text-[10px] text-accent font-bold flex items-center gap-1"><Check size={10} /> {t('readyLabel')}</span>
+                  <span className="text-[11px] text-accent font-bold flex items-center gap-1"><Check size={10} /> {t('readyLabel')}</span>
                 ) : (
-                  <span className="text-[10px] text-muted font-bold">{t('notInstalledLabel')}</span>
+                  <span className="text-[11px] text-muted font-bold">{t('notInstalledLabel')}</span>
                 )}
               </div>
               <div className="text-[11px] text-muted leading-relaxed">{p.desc}</div>
@@ -153,7 +153,7 @@ const PageTunnels = () => {
                 <option value="http">{t('originAuto')}</option>
                 {!isCustomCloudflare && <option value="tcp">TCP</option>}
               </select>
-              <span className="text-[10px] text-muted font-mono">{originUrl} · {t('publicAlwaysHttps')}</span>
+              <span className="text-[11px] text-muted font-mono">{originUrl} · {t('publicAlwaysHttps')}</span>
             </div>
             {currentProvider?.needsAuth && (
               <div className="flex flex-col gap-1.5">
@@ -172,7 +172,7 @@ const PageTunnels = () => {
             <label className="text-[12px] font-semibold text-textDim flex items-center gap-1.5">
               {t(isCustomCloudflare ? 'customDomainProject' : 'pointToProject')}
               <HelpTip textKey="help_tunnelProject" anchor="recipe-tunnel" />
-              <span className="text-[10px] text-muted font-normal">{t('serveVhostDesc')}</span>
+              <span className="text-[11px] text-muted font-normal">{t('serveVhostDesc')}</span>
             </label>
             <select
               className="select-field"
@@ -214,7 +214,7 @@ const PageTunnels = () => {
                 disabled={tunnelStatus !== 'stopped'}
                 spellCheck={false}
               />
-              <span className="text-[10px] text-muted">{t('tunnelProbePathHint')}</span>
+              <span className="text-[11px] text-muted">{t('tunnelProbePathHint')}</span>
             </div>
           )}
 

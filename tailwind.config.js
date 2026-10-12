@@ -6,15 +6,16 @@ export default {
   ],
   theme: {
     extend: {
+      // Windows' own UI fonts: always installed, full Vietnamese support, nothing to bundle.
       fontFamily: {
-        display: ['Syne', 'sans-serif'],
-        mono: ['IBM Plex Mono', 'monospace'],
+        display: ['"Segoe UI Variable Text"', '"Segoe UI Variable"', '"Segoe UI"', 'system-ui', 'sans-serif'],
+        mono: ['"Cascadia Mono"', '"Cascadia Code"', 'Consolas', 'ui-monospace', 'monospace'],
       },
       colors: {
         bg: '#0a0c10',
         surface: '#13151a',
         panel: '#1c1f26',
-        border: '#262a33',
+        border: '#2c313b',
         accent: '#00e5a0',
         accentDim: '#00c68a',
         warn: '#f5a623',

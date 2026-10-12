@@ -50,7 +50,7 @@ const PageLogs = () => {
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
       <div className="px-6 py-4 border-b border-[#1a1c22] bg-bg flex items-center gap-3">
-        <h1 className="text-[18px] font-extrabold tracking-tight flex-1">{t('logsTitle')}</h1>
+        <h1 className="text-[20px] font-extrabold tracking-tight flex-1">{t('logsTitle')}</h1>
 
         <div className="flex bg-panel border border-border rounded-lg overflow-hidden">
           {tabs.map(tab => (
@@ -86,7 +86,7 @@ const PageLogs = () => {
           {currentLog === 'apache' && (
             <>
               <button
-                className="btn-ghost text-[10px] px-2 py-1 flex items-center border border-border rounded"
+                className="btn-ghost text-[11px] px-2 py-1 flex items-center border border-border rounded"
                 onClick={async () => {
                   const { settings, apacheVersions } = useStore.getState();
                   const v = apacheVersions.find(a => a.active)?.version;
@@ -105,7 +105,7 @@ const PageLogs = () => {
                 {t('errorLog')}
               </button>
               <button
-                className="btn-ghost text-[10px] px-2 py-1 flex items-center border border-border rounded"
+                className="btn-ghost text-[11px] px-2 py-1 flex items-center border border-border rounded"
                 onClick={async () => {
                   const { settings, apacheVersions } = useStore.getState();
                   const v = apacheVersions.find(a => a.active)?.version;
@@ -128,7 +128,7 @@ const PageLogs = () => {
 
           {currentLog === 'mysql' && (
             <button
-              className="btn-ghost text-[10px] px-2 py-1 flex items-center border border-border rounded"
+              className="btn-ghost text-[11px] px-2 py-1 flex items-center border border-border rounded"
               onClick={async () => {
                 const { settings, mysqlVersions } = useStore.getState();
                 const v = mysqlVersions.find(m => m.active)?.version;
@@ -145,7 +145,7 @@ const PageLogs = () => {
 
           {currentLog === 'php' && (
             <button
-              className="btn-ghost text-[10px] px-2 py-1 flex items-center border border-border rounded"
+              className="btn-ghost text-[11px] px-2 py-1 flex items-center border border-border rounded"
               onClick={async () => {
                 const { settings, phpVersions } = useStore.getState();
                 const v = phpVersions.find(p => p.active)?.version;

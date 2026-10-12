@@ -8,8 +8,9 @@
   }
 
   body {
-    @apply bg-bg text-text;
-    font-family: 'Syne', sans-serif;
+    @apply bg-bg text-text font-display;
+    /* Ports, PIDs, sizes and percentages keep their width as values change. */
+    font-variant-numeric: tabular-nums;
     margin: 0;
     padding: 0;
     min-height: 100vh;
@@ -24,6 +25,12 @@
   body[data-shell='web'] {
     overflow-x: hidden;
     overflow-y: auto;
+  }
+
+  /* Keyboard focus is always visible, in the accent colour. */
+  :focus-visible {
+    outline: 2px solid #00e5a0;
+    outline-offset: 2px;
   }
 
   ::-webkit-scrollbar {
@@ -46,7 +53,7 @@
 
   .dot-running {
     @apply bg-accent;
-    box-shadow: 0 0 12px rgba(0, 229, 160, 0.8);
+    box-shadow: 0 0 6px rgba(0, 229, 160, 0.5);
     animation: pulse 3s ease-in-out infinite;
   }
 
@@ -73,12 +80,12 @@
 
   .btn-primary {
     @apply bg-accent text-bg font-display font-bold rounded-2xl px-5 py-2 text-[13px] border border-transparent cursor-pointer transition-all duration-300 ease-out tracking-wide;
-    box-shadow: 0 4px 16px rgba(0, 229, 160, 0.3);
+    box-shadow: 0 4px 12px rgba(0, 229, 160, 0.18);
   }
 
   .btn-primary:hover {
     @apply bg-[#00ffb3] -translate-y-[1px];
-    box-shadow: 0 8px 24px rgba(0, 229, 160, 0.4);
+    box-shadow: 0 6px 16px rgba(0, 229, 160, 0.25);
   }
 
   .btn-primary:active {

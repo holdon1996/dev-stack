@@ -120,7 +120,7 @@ const Troubleshooting = () => {
   };
   return (
     <Card id="troubleshooting" title={t('guideTroubleTitle')} desc={t('guideTroubleDesc')}>
-      <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1.4fr)_auto] gap-x-3 text-[10px] font-bold text-muted uppercase tracking-wider pb-2">
+      <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1.4fr)_auto] gap-x-3 text-[11px] font-bold text-muted uppercase tracking-wider pb-2">
         <span>{t('guideSymptom')}</span><span>{t('guideCause')}</span><span>{t('guideFixCol')}</span><span />
       </div>
       <div className="flex flex-col divide-y divide-border">
@@ -150,7 +150,7 @@ const PageGuide = () => {
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
       <div className="px-6 py-5 border-b border-[#1a1c22] bg-bg">
-        <h1 className="text-[18px] font-extrabold m-0 flex items-center gap-2"><LifeBuoy size={20} className="text-accent" /> {t('guideTitle')}</h1>
+        <h1 className="text-[20px] font-extrabold m-0 flex items-center gap-2"><LifeBuoy size={20} className="text-accent" /> {t('guideTitle')}</h1>
         <p className="text-[12px] text-muted m-0 mt-1">{t('guideDesc')}</p>
         <nav className="flex flex-wrap gap-2 mt-3">
           {['checklist', ...RECIPES.map(r => `recipe-${r.id}`), 'troubleshooting'].map(anchor => (

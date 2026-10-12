@@ -66,7 +66,7 @@ const PageDatabase = () => {
       {/* Header */}
       <div className="px-6 py-5 border-b border-[#1a1c22] bg-bg flex items-center justify-between">
         <div className="flex-1 min-w-0">
-          <h1 className="text-[18px] font-extrabold m-0 flex items-center gap-2">
+          <h1 className="text-[20px] font-extrabold m-0 flex items-center gap-2">
             <Server size={20} className="text-accent" /> {t('mysqlServerTitle')}
           </h1>
           <p className="text-[12px] text-muted m-0 mt-1 font-mono flex items-center gap-2">
@@ -85,12 +85,12 @@ const PageDatabase = () => {
             >
               <div className={`w-1.5 h-1.5 rounded-full ${svc.id < 1000 ? 'bg-accent' : 'bg-orange-500'} animate-pulse`} />
               <div className="flex flex-col">
-                <div className="text-[8px] text-muted font-bold uppercase tracking-wider leading-none mb-0.5">
+                <div className="text-[11px] text-muted font-bold uppercase tracking-wider leading-none mb-0.5">
                   {(svc.name || 'MySQL').replace('(DevStack)', '').trim()}
                 </div>
                 <div className="text-[12px] font-bold font-mono text-accent leading-none">
                   v{svc.version !== '—' ? svc.version : '...'}
-                  <span className="text-[9px] text-muted opacity-50 ml-1 font-sans font-medium">:{svc.port}</span>
+                  <span className="text-[11px] text-muted opacity-50 ml-1 font-sans font-medium">:{svc.port}</span>
                 </div>
               </div>
             </div>
@@ -115,26 +115,26 @@ const PageDatabase = () => {
           {mysqlVersions.find(v => v.active && v.installed) && (
             <div className="grid grid-cols-1 md:grid-cols-5 gap-4 bg-accent/5 border border-accent/20 rounded-xl p-4">
               <div className="flex flex-col gap-1">
-                <span className="text-[10px] text-accent font-bold uppercase tracking-wider">{t('host')}</span>
+                <span className="text-[11px] text-accent font-bold uppercase tracking-wider">{t('host')}</span>
                 <span className="text-[13px] font-mono font-bold">127.0.0.1</span>
               </div>
               <div className="flex flex-col gap-1 border-l border-accent/10 pl-4">
-                <span className="text-[10px] text-accent font-bold uppercase tracking-wider">{t('username')}</span>
+                <span className="text-[11px] text-accent font-bold uppercase tracking-wider">{t('username')}</span>
                 <span className="text-[13px] font-mono font-bold">root</span>
               </div>
               <div className="flex flex-col gap-1 border-l border-accent/10 pl-4">
-                <span className="text-[10px] text-accent font-bold uppercase tracking-wider">{t('password')}</span>
+                <span className="text-[11px] text-accent font-bold uppercase tracking-wider">{t('password')}</span>
                 <span className="text-[11px] text-muted italic font-medium">{t('noPassword')}</span>
               </div>
               <div className="flex flex-col gap-1 border-l border-accent/10 pl-4">
-                <span className="text-[10px] text-accent font-bold uppercase tracking-wider">{t('activePort')}</span>
+                <span className="text-[11px] text-accent font-bold uppercase tracking-wider">{t('activePort')}</span>
                 <span className="text-[13px] font-mono font-bold text-accent">
                   {activeSvc?.port || activeV?.port || '—'}
                 </span>
               </div>
               <div className="flex items-end justify-end border-l border-accent/10 pl-4 gap-2">
                 {activeSvc?.status !== 'running' && (
-                  <span className="text-[10px] text-warn font-bold flex items-center gap-1 mr-2">
+                  <span className="text-[11px] text-warn font-bold flex items-center gap-1 mr-2">
                     {t('notRunningWarning')}
                   </span>
                 )}
@@ -187,7 +187,7 @@ const PageDatabase = () => {
               <div className="flex flex-col gap-4 animate-in fade-in slide-in-from-top-2 duration-200">
                 <div className="grid grid-cols-1 md:grid-cols-[120px_1fr] gap-3">
                   <div className="flex flex-col gap-1.5">
-                    <label className="text-[10px] font-bold text-muted uppercase ml-1">{t('versionLabel')}</label>
+                    <label className="text-[11px] font-bold text-muted uppercase ml-1">{t('versionLabel')}</label>
                     <input
                       type="text"
                       placeholder={t('versionPlaceholder')}
@@ -197,7 +197,7 @@ const PageDatabase = () => {
                     />
                   </div>
                   <div className="flex flex-col gap-1.5">
-                    <label className="text-[10px] font-bold text-muted uppercase ml-1">{t('downloadLinkLabel')}</label>
+                    <label className="text-[11px] font-bold text-muted uppercase ml-1">{t('downloadLinkLabel')}</label>
                     <input
                       type="text"
                       placeholder={t('downloadLinkPlaceholder')}
@@ -226,7 +226,7 @@ const PageDatabase = () => {
             <div className="flex items-center justify-between mb-3 px-1">
               <div className="text-[11px] font-bold text-muted tracking-[0.08em] uppercase">{t('installedAvailableVersions')}</div>
               <div
-                className="text-[10px] text-muted font-mono cursor-pointer hover:text-accent transition-colors flex items-center gap-1"
+                className="text-[11px] text-muted font-mono cursor-pointer hover:text-accent transition-colors flex items-center gap-1"
                 onClick={() => useStore.getState().openExplorer(`${settings.devStackDir}/bin/mysql/`)}
                 title={t('openInExplorer')}
               >
@@ -249,7 +249,7 @@ const PageDatabase = () => {
                   <div className="flex items-start justify-between mb-3 mt-0.5">
                     <div>
                       <div className="text-[16px] font-bold font-mono text-text">MySQL {v.version}</div>
-                      <div className="text-[10px] text-muted font-mono mt-0.5 uppercase tracking-wider">
+                      <div className="text-[11px] text-muted font-mono mt-0.5 uppercase tracking-wider">
                         {t('communityServer')}
                       </div>
                       {v.installed && (
@@ -266,17 +266,17 @@ const PageDatabase = () => {
                             }
                           }}
                         >
-                          <span className="text-[10px] font-bold font-mono text-accent">PORT: {v.active ? (settings.portMySQL || 3306) : 3306}</span>
+                          <span className="text-[11px] font-bold font-mono text-accent">PORT: {v.active ? (settings.portMySQL || 3306) : 3306}</span>
                           {v.active && <Edit2 size={10} className="text-accent/40 group-hover/port:text-accent transition-colors" />}
                         </div>
                       )}
                     </div>
                     {v.installed ? (
-                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${v.active ? 'bg-accent/15 text-accent' : 'bg-border text-textDim'}`}>
+                      <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${v.active ? 'bg-accent/15 text-accent' : 'bg-border text-textDim'}`}>
                         {v.active ? `● ${t('defaultVersion')}` : t('installedState')}
                       </span>
                     ) : (
-                      <span className="text-[10px] text-muted font-bold opacity-30 tracking-widest uppercase">{t('availableState')}</span>
+                      <span className="text-[11px] text-muted font-bold opacity-30 tracking-widest uppercase">{t('availableState')}</span>
                     )}
                   </div>
 
@@ -377,12 +377,12 @@ const PageDatabase = () => {
                     <div className="w-2.5 h-2.5 rounded-full bg-[#febc2e]" />
                     <div className="w-2.5 h-2.5 rounded-full bg-[#28c840]" />
                   </div>
-                  <span className="text-[10px] font-bold text-muted uppercase tracking-wider ml-1">
+                  <span className="text-[11px] font-bold text-muted uppercase tracking-wider ml-1">
                     {t('installationOutput')}
                   </span>
                 </div>
                 <button
-                  className="text-[10px] text-muted hover:text-textDim uppercase font-bold"
+                  className="text-[11px] text-muted hover:text-textDim uppercase font-bold"
                   onClick={() => useStore.setState({ mysqlInstallLogs: [] })}
                 >
                   {t('clearLog')}
@@ -406,7 +406,7 @@ const PageDatabase = () => {
                         style={{ width: `${pct}%` }}
                       />
                     </div>
-                    <div className="text-right text-[10px] text-muted mt-1">{pct}%</div>
+                    <div className="text-right text-[11px] text-muted mt-1">{pct}%</div>
                   </div>
                 );
               })()}

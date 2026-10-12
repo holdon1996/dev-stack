@@ -12,7 +12,7 @@ const ProviderCard = ({ provider, active, onClick }) => (
   >
     <div className="flex items-start justify-between gap-3">
       <div className="text-[15px] font-bold text-white">{provider.name}</div>
-      <span className={`rounded-md px-2 py-1 text-[10px] font-bold uppercase tracking-[0.12em] ${active ? 'bg-accent text-bg' : 'border border-white/10 text-textDim'}`}>
+      <span className={`rounded-md px-2 py-1 text-[11px] font-bold uppercase tracking-[0.12em] ${active ? 'bg-accent text-bg' : 'border border-white/10 text-textDim'}`}>
         {provider.tag}
       </span>
     </div>
@@ -191,7 +191,7 @@ const PageMailServer = () => {
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
       <div className="px-6 py-5 border-b border-[#1a1c22] bg-bg">
-        <h1 className="m-0 flex items-center gap-2 text-[18px] font-extrabold">
+        <h1 className="m-0 flex items-center gap-2 text-[20px] font-extrabold">
           <Mail size={18} className="text-accent" /> Mail Server
         </h1>
         <p className="m-0 mt-1 text-[12px] font-mono text-muted">

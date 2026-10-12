@@ -23,7 +23,6 @@ const translations = {
     running: 'Running',
     stopped: 'Stopped',
     sites: 'Sites',
-    uptime: 'Uptime',
     serviceInstances: 'Service Instances',
     addService: '+ Add Service',
     statusRunning: 'Running',
@@ -384,7 +383,6 @@ const translations = {
     cpuUsage: 'CPU Usage',
     usedRam: 'Used RAM',
     runningCount: 'Running',
-    uptime: 'Uptime',
     servicesList: 'Services List',
 
     // Sites page
@@ -458,6 +456,7 @@ const translations = {
     serviceExited: '{name} exited right after starting (bad config, missing DLL or port taken). Open Logs to see why.',
     serviceActionFailed: '{name}: the action failed: {error}',
     serviceBusy: '{name} is busy with another action. Try again in a moment.',
+    managedProjects: 'Managed projects',
     wwwUnavailable: 'Cannot read the www folder {path}. Showing the last known projects; the hosts file is not changed until it is back.',
     hostsWriteFailed: 'Cannot update the hosts file. Run DevStack as Administrator, or check that an antivirus is not locking it. ({error})',
     rootPathMissing: 'The www folder is not configured (Settings).',
@@ -841,7 +840,6 @@ const translations = {
     running: 'Đang chạy',
     stopped: 'Đã dừng',
     sites: 'Website',
-    uptime: 'Thời gian chạy',
     serviceInstances: 'Danh sách dịch vụ',
     addService: '+ Thêm dịch vụ',
     statusRunning: 'Đang chạy',
@@ -1202,7 +1200,6 @@ const translations = {
     cpuUsage: 'Sử dụng CPU',
     usedRam: 'RAM đã dùng',
     runningCount: 'Đang chạy',
-    uptime: 'Thời gian chạy',
     servicesList: 'Danh sách dịch vụ',
 
     // Sites page
@@ -1276,6 +1273,7 @@ const translations = {
     serviceExited: '{name} thoát ngay sau khi khởi động (sai cấu hình, thiếu DLL hoặc port bị chiếm). Mở trang Nhật ký để xem nguyên nhân.',
     serviceActionFailed: '{name}: thao tác bị lỗi: {error}',
     serviceBusy: '{name} đang bận với một thao tác khác. Hãy thử lại sau giây lát.',
+    managedProjects: 'Dự án đang quản lý',
     wwwUnavailable: 'Không đọc được thư mục www {path}. Đang hiện danh sách dự án gần nhất; file hosts sẽ không bị thay đổi cho tới khi thư mục truy cập lại được.',
     hostsWriteFailed: 'Không cập nhật được file hosts. Hãy chạy DevStack bằng quyền Administrator, hoặc kiểm tra antivirus có đang khoá file không. ({error})',
     rootPathMissing: 'Chưa cấu hình thư mục www (trong Cài đặt).',

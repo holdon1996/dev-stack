@@ -59,11 +59,11 @@ const ServiceRow = ({ service }) => {
         </span>
         <div className="flex-1 overflow-hidden">
           <div className="text-[14px] font-bold tracking-tight">{service.name}</div>
-          <div className={`text-[10px] font-mono truncate ${owner ? 'text-danger' : 'text-muted'}`} title={service.path || owner?.exe}>
+          <div className={`text-[11px] font-mono truncate ${owner ? 'text-danger' : 'text-muted'}`} title={service.path || owner?.exe}>
             {service.path || (owner ? t('externalHoldsPort') : service.useExternal ? t('usingExternalService') : t('notRunning'))}
           </div>
           {service.type === 'mail' && (
-            <button type="button" className="text-[10px] text-accent hover:underline flex items-center gap-1" onClick={() => openUrl(`http://127.0.0.1:${useStore.getState().settings.mailUiPort || 8025}`)}>
+            <button type="button" className="text-[11px] text-accent hover:underline flex items-center gap-1" onClick={() => openUrl(`http://127.0.0.1:${useStore.getState().settings.mailUiPort || 8025}`)}>
               <ExternalLink size={10} /> {t('openMailpitUi')}
             </button>
           )}
@@ -73,7 +73,7 @@ const ServiceRow = ({ service }) => {
       <div className="flex flex-col gap-1 w-[120px]">
         {service.status === 'running' && (
           <div className="flex items-center gap-1.5">
-            <span className="text-[9px] text-muted font-bold tracking-widest">{useStore.getState().t('pid')}</span>
+            <span className="text-[11px] text-muted font-bold tracking-widest">{useStore.getState().t('pid')}</span>
             <span className="text-[12px] font-mono text-white">{service.pid}</span>
           </div>
         )}
@@ -93,7 +93,7 @@ const ServiceRow = ({ service }) => {
         )}
       </div>
 
-      <div className="flex-1 flex flex-col items-center gap-1 group/port relative">
+      <div className="flex-1 flex flex-col items-start gap-1 group/port relative">
         <div className="relative">
           <span
             className={`tag tag-port cursor-pointer hover:bg-accent/20 hover:text-accent border border-transparent hover:border-accent/30 transition-all font-mono px-3 py-1 rounded-lg flex items-center gap-1
@@ -101,7 +101,7 @@ const ServiceRow = ({ service }) => {
             onClick={() => { setTempPort(service.port); setIsEditingPort(true); }}
             title={useStore.getState().t('clickToChangePortTooltip')}
           >
-            <span className="text-[10px] opacity-40">:</span>
+            <span className="text-[11px] opacity-40">:</span>
             {service.port || '—'}
           </span>
 
@@ -119,9 +119,9 @@ const ServiceRow = ({ service }) => {
             />
           )}
         </div>
-        <div className="text-[9px] text-muted font-bold tracking-widest uppercase opacity-0 group-hover/port:opacity-100 transition-opacity">{useStore.getState().t('changePort')}</div>
+        <div className="text-[11px] text-muted font-bold tracking-widest uppercase opacity-0 group-hover/port:opacity-100 transition-opacity">{useStore.getState().t('changePort')}</div>
         {owner && (
-          <div className="mt-1 max-w-[320px] bg-red-500/10 px-2 py-1.5 rounded border border-red-500/20 text-[10px] text-red-300 leading-snug">
+          <div className="mt-1 max-w-[320px] bg-red-500/10 px-2 py-1.5 rounded border border-red-500/20 text-[11px] text-red-300 leading-snug">
             <div>{t('portOwnedBy', { port: service.port, name: owner.service ? t('windowsServiceLabel', { name: owner.service }) : owner.name, pid: owner.pid, exe: owner.exe || '?' })}</div>
             <div className="flex flex-wrap gap-1 mt-1">
               {owner.service && (
@@ -135,9 +135,9 @@ const ServiceRow = ({ service }) => {
         )}
         {service.portConflict && !owner && !service.useExternal && (
           <div className="flex items-center gap-2 mt-1 bg-red-500/10 px-1.5 py-0.5 rounded border border-red-500/20 animate-in fade-in zoom-in duration-200">
-            <span className="text-[8px] text-red-500 font-bold animate-pulse uppercase tracking-tighter">{useStore.getState().t('portBusy')}</span>
+            <span className="text-[11px] text-red-500 font-bold animate-pulse uppercase tracking-tighter">{useStore.getState().t('portBusy')}</span>
             <button
-              className="text-[8px] bg-red-500 text-white px-1 rounded hover:brightness-110 active:scale-95 transition-all font-bold uppercase"
+              className="text-[11px] bg-red-500 text-white px-1 rounded hover:brightness-110 active:scale-95 transition-all font-bold uppercase"
               onClick={(e) => { e.stopPropagation(); useStore.getState().killPort(service.port); }}
               title={useStore.getState().t('killProcessTooltip')}
             >
@@ -149,12 +149,12 @@ const ServiceRow = ({ service }) => {
 
       <div className="flex justify-end ml-auto min-w-[120px]">
         {service.type === 'php' ? (
-          <div className="text-[10px] text-muted font-bold tracking-wider leading-tight text-right w-full whitespace-nowrap opacity-60 flex items-center justify-end whitespace-pre-wrap">{useStore.getState().t('linkedToApache')}</div>
+          <div className="text-[11px] text-muted font-bold tracking-wider leading-tight text-right w-full whitespace-nowrap opacity-60 flex items-center justify-end whitespace-pre-wrap">{useStore.getState().t('linkedToApache')}</div>
         ) : (
           <button
             className={`px-6 py-2 rounded-lg font-bold text-[13px] transition-all active:scale-95 flex items-center gap-2
               ${service.status === 'running'
-                ? 'bg-red-500/10 text-red-500 hover:bg-red-500/20'
+                ? 'bg-surface text-textDim border border-border hover:text-text hover:border-[#3d4049]'
                 : isTransitioning
                   ? 'bg-surface text-muted cursor-not-allowed'
                   : 'bg-accent text-bg hover:brightness-110 shadow-lg shadow-accent/20'
@@ -231,9 +231,9 @@ const MinioPanel = () => {
         </button>
       </div>
       <div className="grid grid-cols-3 gap-3 text-[12px] font-mono mb-3">
-        <div><div className="text-[10px] text-muted font-sans font-bold uppercase">{t('endpoint')}</div>http://127.0.0.1:{port}</div>
-        <div><div className="text-[10px] text-muted font-sans font-bold uppercase">{t('accessKey')}</div>{user}</div>
-        <div><div className="text-[10px] text-muted font-sans font-bold uppercase">{t('secretKey')}</div>{password}</div>
+        <div><div className="text-[11px] text-muted font-sans font-bold uppercase">{t('endpoint')}</div>http://127.0.0.1:{port}</div>
+        <div><div className="text-[11px] text-muted font-sans font-bold uppercase">{t('accessKey')}</div>{user}</div>
+        <div><div className="text-[11px] text-muted font-sans font-bold uppercase">{t('secretKey')}</div>{password}</div>
       </div>
       <form className="flex gap-2" onSubmit={async (e) => { e.preventDefault(); if (await createMinioBucket(bucket.trim())) setBucket(''); }}>
         <input aria-label={t('bucketName')} className="input-field flex-1 font-mono text-[12px]" placeholder="na-local" value={bucket} onChange={e => setBucket(e.target.value.toLowerCase())} disabled={svc?.status !== 'running'} />
@@ -317,25 +317,9 @@ const FirstRunBanner = () => {
 };
 
 const PageServices = () => {
-  const { startAll, stopAll, bulkAction, t, startTime, services, systemStats, isElevated } = useStore();
+  const { startAll, stopAll, bulkAction, t, services, systemStats, isElevated, siteConfigs, sites } = useStore();
   const { cpu, ram } = systemStats;
-  const [now, setNow] = React.useState(Date.now());
-
-  React.useEffect(() => {
-    const timer = window.setInterval(() => {
-      setNow(Date.now());
-    }, 30000);
-
-    return () => window.clearInterval(timer);
-  }, []);
-
-  const uptimeStr = React.useMemo(() => {
-    if (!startTime) return '0h 0m';
-    const diff = Math.max(0, Math.floor((now - startTime) / 1000));
-    const h = Math.floor(diff / 3600);
-    const m = Math.floor((diff % 3600) / 60);
-    return `${h}h ${m}m`;
-  }, [now, startTime]);
+  const managedCount = sites.filter(s => siteConfigs[s.key]?.managed).length;
 
   const runningCount = services.filter(s => s.status === 'running').length;
 
@@ -344,8 +328,8 @@ const PageServices = () => {
       <div className="px-6 py-5 border-b border-[#1a1c22] bg-bg flex items-center justify-between">
         <div className="flex-1">
           <div className="flex items-center gap-2">
-            <h1 className="text-[18px] font-extrabold m-0">{t('servicesTitle') || 'Services'}</h1>
-            <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full border ${isElevated ? 'text-accent border-accent/30 bg-accent/10' : 'text-textDim border-white/10 bg-white/[0.03]'}`}>
+            <h1 className="text-[20px] font-extrabold m-0">{t('servicesTitle') || 'Services'}</h1>
+            <span className={`text-[11px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full border ${isElevated ? 'text-accent border-accent/30 bg-accent/10' : 'text-textDim border-white/10 bg-white/[0.03]'}`}>
               {isElevated ? t('adminBadge') : t('standardBadge')}
             </span>
           </div>
@@ -365,7 +349,7 @@ const PageServices = () => {
           <button type="button" className="btn-ghost flex items-center gap-2" disabled={!!bulkAction} onClick={startAll}>
             <Play size={14} /> {t('startAll') || 'Start All'}
           </button>
-          <button type="button" className="btn-danger flex items-center gap-2" disabled={!!bulkAction} onClick={stopAll}>
+          <button type="button" className="btn-ghost flex items-center gap-2" disabled={!!bulkAction} onClick={stopAll}>
             <Pause size={14} /> {t('stopAll') || 'Stop All'}
           </button>
         </div>
@@ -377,11 +361,11 @@ const PageServices = () => {
           <StatCard title={t('cpuUsage')} value={`${cpu}%`} color="text-accent" />
           <StatCard title={t('usedRam')} value={`${ram} GB`} color="text-info" />
           <StatCard title={t('runningCount')} value={runningCount} color="text-accent" />
-          <StatCard title={t('uptime')} value={uptimeStr} color="text-warn" />
+          <StatCard title={t('managedProjects')} value={managedCount} color="text-text" />
         </div>
 
         <div className="flex justify-between items-center mb-4">
-          <div className="text-[10px] font-bold text-muted uppercase tracking-[0.2em]">{t('servicesList')}</div>
+          <div className="text-[11px] font-bold text-muted uppercase tracking-[0.2em]">{t('servicesList')}</div>
         </div>
         <div className="flex flex-col">
           {services.map(s => <ServiceRow key={s.id} service={s} />)}

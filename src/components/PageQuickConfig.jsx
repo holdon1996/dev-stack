@@ -55,7 +55,7 @@ const ConfigCard = ({ file }) => {
           <div className="flex items-center gap-2 mb-0.5">
             <div className="text-[14px] font-bold tracking-tight">{file.label}</div>
             {file.path && file.source && (
-              <span className={`text-[9px] px-1.5 py-0 rounded-full font-bold uppercase border
+              <span className={`text-[11px] px-1.5 py-0 rounded-full font-bold uppercase border
                 ${file.source === 'XAMPP' ? 'bg-orange-500/20 text-orange-500 border-orange-500/30' :
                   file.source === 'Laragon' ? 'bg-blue-500/20 text-blue-500 border-blue-500/30' :
                     'bg-accent/20 text-accent border-accent/30'}
@@ -92,14 +92,14 @@ const ConfigCard = ({ file }) => {
                 {file.path || t('pathNotConfigured')}
               </span>
               <button
-                className="opacity-0 group-hover:opacity-100 transition-opacity btn-ghost py-0.5 px-1.5 text-[10px]"
+                className="opacity-0 group-hover:opacity-100 transition-opacity btn-ghost py-0.5 px-1.5 text-[11px]"
                 onClick={handleBrowse}
                 title={t('browse')}
               >
                 <FolderSearch size={11} />
               </button>
               <button
-                className="opacity-0 group-hover:opacity-100 transition-opacity btn-ghost py-0.5 px-1.5 text-[10px]"
+                className="opacity-0 group-hover:opacity-100 transition-opacity btn-ghost py-0.5 px-1.5 text-[11px]"
                 onClick={() => { setTempPath(file.path); setEditing(true); }}
                 title={t('editPath')}
               >
@@ -117,7 +117,7 @@ const ConfigCard = ({ file }) => {
             <ExternalLink size={12} /> {t('open')}
           </button>
           <button
-            className="btn-ghost px-2.5 py-1 text-[10px] flex items-center justify-center gap-1.5 opacity-60 hover:opacity-100 transition-opacity border-none"
+            className="btn-ghost px-2.5 py-1 text-[11px] flex items-center justify-center gap-1.5 opacity-60 hover:opacity-100 transition-opacity border-none"
             onClick={() => openConfigFile(file.id, true, file.path)}
             title={t('openWithTitle')}
           >
@@ -137,7 +137,7 @@ const PageQuickConfig = () => {
     <div className="flex-1 flex flex-col overflow-hidden">
       <div className="px-6 py-5 border-b border-[#1a1c22] bg-bg flex items-center justify-between">
         <div>
-          <h1 className="text-[18px] font-extrabold m-0 flex items-center gap-2">
+          <h1 className="text-[20px] font-extrabold m-0 flex items-center gap-2">
             <FileCode size={20} className="text-accent" /> {t('configTitle')}
           </h1>
           <p className="text-[12px] text-muted m-0 mt-1 font-mono">{t('configDesc')}</p>

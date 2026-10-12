@@ -170,7 +170,7 @@ const PageSettings = () => {
     <div className="flex-1 flex flex-col overflow-y-auto">
       <div className="px-6 py-5 border-b border-[#1a1c22] bg-bg flex items-center">
         <div className="flex-1">
-          <h1 className="text-[18px] font-extrabold m-0">{t('settingsTitle')}</h1>
+          <h1 className="text-[20px] font-extrabold m-0">{t('settingsTitle')}</h1>
           <p className="text-[12px] text-muted m-0 mt-1 font-mono">{t('settingsDesc')}</p>
         </div>
         <button className="btn-ghost flex items-center gap-2 mr-2" onClick={handleOpenInspector}>

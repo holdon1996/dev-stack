@@ -53,7 +53,7 @@ const PagePHP = () => {
       {/* Header */}
       <div className="px-6 py-5 border-b border-border/40 shadow-sm bg-bg flex items-center gap-4 z-10 relative">
         <div className="flex-1">
-          <h1 className="text-[18px] font-extrabold m-0">{t('phpTitle')}</h1>
+          <h1 className="text-[20px] font-extrabold m-0">{t('phpTitle')}</h1>
           <p className="text-[12px] text-muted m-0 mt-1 font-mono">{t('phpDesc')}</p>
         </div>
         <div
@@ -61,7 +61,7 @@ const PagePHP = () => {
         >
           <Terminal size={14} className="text-accent" />
           <div>
-            <div className="text-[10px] text-muted font-bold tracking-wider uppercase">{t('currentPhp')}</div>
+            <div className="text-[11px] text-muted font-bold tracking-wider uppercase">{t('currentPhp')}</div>
             <div className="text-[14px] font-bold font-mono text-accent">
               {detectedPhpVersion || t('notDetected')}
             </div>
@@ -85,7 +85,7 @@ const PagePHP = () => {
             <div className="flex-1">
               <div className="text-[14px] font-bold text-red-500 flex items-center gap-2">
                 {t('phpConflictTitle')}
-                {isSystemConflict && <span className="text-[10px] bg-red-500 text-white px-1.5 py-0.5 rounded uppercase tracking-wider">{t('systemLevel')}</span>}
+                {isSystemConflict && <span className="text-[11px] bg-red-500 text-white px-1.5 py-0.5 rounded uppercase tracking-wider">{t('systemLevel')}</span>}
               </div>
               <div className="text-[12px] text-red-400 mt-1 leading-relaxed">
                 {isSystemConflict ? t('phpConflictSystemDesc') : t('phpConflictDesc', { path: phpVersions.find(p => p.active && p.isSystem)?.path })}
@@ -127,7 +127,7 @@ const PagePHP = () => {
                   value={customTag}
                   onChange={(e) => setCustomTag(e.target.value)}
                 />
-                <div className="text-[10px] text-muted mt-2 font-mono">
+                <div className="text-[11px] text-muted mt-2 font-mono">
                   {t('customVersionPattern')}
                 </div>
               </div>
@@ -175,7 +175,7 @@ const PagePHP = () => {
             <div>
               <div className="text-[11px] font-bold text-muted tracking-[0.08em] uppercase">{t('phpVersionsTitle')}</div>
               <div
-                className="text-[10px] text-muted font-mono mt-0.5 cursor-pointer hover:text-accent transition-colors flex items-center gap-1"
+                className="text-[11px] text-muted font-mono mt-0.5 cursor-pointer hover:text-accent transition-colors flex items-center gap-1"
                 onClick={() => useStore.getState().openExplorer(`${settings.devStackDir}/bin/php/`)}
                 title={t('openInExplorer')}
               >
@@ -209,9 +209,9 @@ const PagePHP = () => {
                     <div className="flex flex-col">
                       <div className="text-[16px] font-bold font-mono tracking-tight flex items-center gap-2">
                         PHP {p.version}
-                        {p.isSystem && <span className="text-[9px] bg-red-500/20 text-red-500 px-1.5 py-0.5 rounded border border-red-500/20">{t('systemLevel')}</span>}
+                        {p.isSystem && <span className="text-[11px] bg-red-500/20 text-red-500 px-1.5 py-0.5 rounded border border-red-500/20">{t('systemLevel')}</span>}
                       </div>
-                      <div className="text-[10px] text-muted font-mono mt-0.5 uppercase tracking-wider">
+                      <div className="text-[11px] text-muted font-mono mt-0.5 uppercase tracking-wider">
                         {p.threadSafe ? t('tsThreadSafe') : t('ntsNonThreadSafe')}
                       </div>
                     </div>
@@ -221,9 +221,9 @@ const PagePHP = () => {
                         <Check size={10} /> {p.isSystem ? t('systemActive') : t('active')}
                       </div>
                     ) : p.installed ? (
-                      <div className="tag tag-version px-2 py-0.5 text-[10px] uppercase font-bold">{t('installed')}</div>
+                      <div className="tag tag-version px-2 py-0.5 text-[11px] uppercase font-bold">{t('installed')}</div>
                     ) : (
-                      <div className="text-[10px] text-muted font-bold opacity-50 tracking-widest uppercase">{t('available')}</div>
+                      <div className="text-[11px] text-muted font-bold opacity-50 tracking-widest uppercase">{t('available')}</div>
                     )}
                   </div>
 
@@ -315,7 +315,7 @@ const PagePHP = () => {
                   <span className="text-[11px] font-bold text-muted uppercase tracking-wider ml-2">{t('installationOutput')}</span>
                 </div>
                 <button
-                  className="text-[10px] text-muted hover:text-textDim uppercase font-bold"
+                  className="text-[11px] text-muted hover:text-textDim uppercase font-bold"
                   onClick={() => useStore.setState({ phpInstallLogs: [] })}
                 >
                   {t('clearLog')}
@@ -341,7 +341,7 @@ const PagePHP = () => {
                         style={{ width: `${pct || 5}%` }}
                       />
                     </div>
-                    <div className="text-right text-[10px] text-muted mt-1">
+                    <div className="text-right text-[11px] text-muted mt-1">
                       {total > 0 ? `${pct}%` : t('mbDownloaded', { downloaded })}
                     </div>
                   </div>
@@ -380,9 +380,9 @@ const PagePHP = () => {
           </div>
           <label className="flex items-start gap-2 mt-3 text-[12px] cursor-pointer">
             <input type="checkbox" className="mt-0.5" checked={!!settings.caEnvForCurl} onChange={e => useStore.getState().setCurlCaEnv(e.target.checked)} />
-            <span>{t('caEnvForCurl')}<span className="block text-[10px] text-muted">{t('caEnvForCurlHint')}</span></span>
+            <span>{t('caEnvForCurl')}<span className="block text-[11px] text-muted">{t('caEnvForCurlHint')}</span></span>
           </label>
-          <div className="text-[10px] text-muted mt-2">{t('nodeCaHint')}</div>
+          <div className="text-[11px] text-muted mt-2">{t('nodeCaHint')}</div>
         </div>
 
         {/* Extensions Manager */}

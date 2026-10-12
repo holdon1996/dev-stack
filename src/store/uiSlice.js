@@ -4,7 +4,6 @@ let toastTimer = null;
 
 export const createUiSlice = (set, get) => ({
     activePage: 'services',
-    startTime: Date.now(),
     toast: { show: false, msg: '', type: 'ok' },
     isDownloading: false,
     downloadProgress: 0,

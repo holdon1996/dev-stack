@@ -111,8 +111,8 @@ const ProjectDomainRow = ({ site, onSettings }) => {
       <div className="min-w-0 pt-1.5">
         <div className="text-[12px] font-bold truncate" title={site.key}>{site.key}</div>
         {managed
-          ? <div className="text-[10px] text-accent flex items-center gap-1">{cfg.ssl && <Lock size={9} />}{t(cfg.ssl ? 'schemeHttps' : 'schemeHttp')}</div>
-          : <div className="text-[10px] text-muted" title={t('notManagedHint')}>{t('notManagedBadge')}</div>}
+          ? <div className="text-[11px] text-accent flex items-center gap-1">{cfg.ssl && <Lock size={9} />}{t(cfg.ssl ? 'schemeHttps' : 'schemeHttp')}</div>
+          : <div className="text-[11px] text-muted" title={t('notManagedHint')}>{t('notManagedBadge')}</div>}
       </div>
       <div className="min-w-0">
         <input
@@ -125,8 +125,8 @@ const ProjectDomainRow = ({ site, onSettings }) => {
           disabled={saving}
           spellCheck={false}
         />
-        {unresolved.length > 0 && <div className="text-[10px] text-danger mt-1">{t('notResolving')}: {unresolved.join(', ')}</div>}
-        {warnings.map(code => <div key={code} className="text-[10px] text-warn mt-1">{t(code)}</div>)}
+        {unresolved.length > 0 && <div className="text-[11px] text-danger mt-1">{t('notResolving')}: {unresolved.join(', ')}</div>}
+        {warnings.map(code => <div key={code} className="text-[11px] text-warn mt-1">{t(code)}</div>)}
       </div>
       <div className="min-w-0">
         <input
@@ -140,7 +140,7 @@ const ProjectDomainRow = ({ site, onSettings }) => {
           disabled={saving}
           spellCheck={false}
         />
-        {(!domainValid || !aliasesValid) && <div className="text-[10px] text-danger mt-1">{t('siteErrHost')}</div>}
+        {(!domainValid || !aliasesValid) && <div className="text-[11px] text-danger mt-1">{t('siteErrHost')}</div>}
       </div>
       <div className="flex gap-1.5 pt-0.5">
         {dirty ? (
@@ -246,7 +246,7 @@ const PageDomains = () => {
     <div className="flex-1 flex flex-col overflow-hidden">
       <div className="px-6 py-5 border-b border-[#1a1c22] bg-bg flex items-center gap-3">
         <div className="flex-1">
-          <h1 className="text-[18px] font-extrabold m-0 flex items-center gap-2"><Globe2 size={20} className="text-accent" /> {t('domainsTitle')}</h1>
+          <h1 className="text-[20px] font-extrabold m-0 flex items-center gap-2"><Globe2 size={20} className="text-accent" /> {t('domainsTitle')}</h1>
           <p className="text-[12px] text-muted m-0 mt-1 font-mono">{t('domainsDesc')}</p>
         </div>
         <ConfigStaleBadge />
@@ -265,7 +265,7 @@ const PageDomains = () => {
           {sites.some(site => !siteConfigs[site.key]?.managed) && (
             <p className="text-[11px] text-muted m-0 mb-3"><span className="font-bold">{t('notManagedBadge')}</span>: {t('notManagedHint')}</p>
           )}
-          <div className="grid grid-cols-[190px_minmax(0,1fr)_minmax(0,1fr)_auto] gap-3 text-[10px] font-bold text-muted uppercase tracking-wider pb-1">
+          <div className="grid grid-cols-[190px_minmax(0,1fr)_minmax(0,1fr)_auto] gap-3 text-[11px] font-bold text-muted uppercase tracking-wider pb-1">
             <span>{t('project')}</span><span>{t('primaryDomain')}</span><span>{t('aliases')}</span><span />
           </div>
           <div className="flex flex-col divide-y divide-border">
@@ -312,7 +312,7 @@ const PageDomains = () => {
                   <input type="checkbox" checked={on} onChange={() => setPicked(on ? picked.filter(l => l !== line.line) : [...picked, line.line])} />
                   <span className="text-textDim">{line.ip}</span>
                   <span className="truncate">{line.hosts.join(' ')}</span>
-                  {owners.length > 0 && <span className="text-[10px] font-sans text-warn">{t('matchesProject', { project: owners.join(', ') })}</span>}
+                  {owners.length > 0 && <span className="text-[11px] font-sans text-warn">{t('matchesProject', { project: owners.join(', ') })}</span>}
                 </label>
               );
             })}
