@@ -433,6 +433,10 @@ pub fn sync_hosts_domains(entries: Vec<HostEntry>, remove: Vec<String>, legacy: 
         return Err(format!("Invalid IP address: {}", bad.ip));
     }
     let entries: Vec<(String, String)> = entries.into_iter().map(|e| (e.ip, e.host)).collect();
+    // Runs off the main thread: serialize the read-modify-write so concurrent syncs
+    // (apply while editing standalone hosts) cannot undo each other's changes.
+    static HOSTS_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _guard = HOSTS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let path = Path::new(HOSTS_PATH);
     let bytes = fs::read(path).map_err(|e| e.to_string())?;
     let body = crate::strip_utf8_bom(&bytes);
