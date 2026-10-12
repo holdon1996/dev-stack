@@ -959,11 +959,30 @@ fn stop_devstack_processes(app: &tauri::AppHandle) {
     proc_stop_all();
     let state = app.state::<AppState>();
     let dir = state.devstack_dir.lock().unwrap().clone();
-    let Some(dir) = dir else { return };
+    let Some(prefix) = dir.as_deref().and_then(dir_prefix) else { return };
+    // One process scan for all service binaries (a full scan per name took ~1 s in total).
     let mut sys = state.sys.lock().unwrap();
-    for name in SERVICE_EXES {
-        kill_by_name_under(&mut sys, name, Some(&dir));
+    sys.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
+    for process in sys.processes().values() {
+        let name = process.name().to_str().unwrap_or("").to_lowercase();
+        let exe = process.exe().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_default();
+        if SERVICE_EXES.contains(&name.as_str()) && exe.starts_with(prefix.as_str()) {
+            process.kill();
+        }
     }
+}
+
+/// Hides the window at once and stops DevStack's processes in the background before
+/// exiting, so closing never looks frozen while services shut down.
+fn quit_in_background(app: &tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.hide();
+    }
+    let app = app.clone();
+    std::thread::spawn(move || {
+        stop_devstack_processes(&app);
+        app.exit(0);
+    });
 }
 
 /// PID of the process listening on `port` (IPv4), if any.
@@ -3339,9 +3358,10 @@ pub fn run() {
             devstack_dir: Mutex::new(detect_install_base_dir_internal().ok().flatten()),
         })
         .on_window_event(|window, event| {
-            if let tauri::WindowEvent::CloseRequested { .. } = event {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 if window.label() == "main" {
-                    stop_devstack_processes(window.app_handle());
+                    api.prevent_close();
+                    quit_in_background(window.app_handle());
                 }
             }
         })
@@ -3458,10 +3478,7 @@ pub fn run() {
                 .menu(&menu)
                 .show_menu_on_left_click(false)
                 .on_menu_event(|app, event| match event.id.as_ref() {
-                    "quit" => {
-                        stop_devstack_processes(app);
-                        app.exit(0);
-                    }
+                    "quit" => quit_in_background(app),
                     "show" => {
                         let window = app.get_webview_window("main").unwrap();
                         window.show().unwrap();

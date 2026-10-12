@@ -202,10 +202,14 @@ pub fn proc_stop(id: String) {
 
 #[tauri::command(async)]
 pub fn proc_stop_all() {
+    // In parallel: each `taskkill /T` takes ~200 ms, and a few sites with 4-process
+    // PHP pools add up to seconds when stopped one by one (felt as a hang on close).
     let ids: Vec<String> = registry().lock().unwrap().keys().cloned().collect();
-    for id in ids {
-        proc_stop(id);
-    }
+    std::thread::scope(|s| {
+        for id in ids {
+            s.spawn(move || proc_stop(id));
+        }
+    });
 }
 
 /// `start` command line for a terminal window. `start` gives the shell a console
