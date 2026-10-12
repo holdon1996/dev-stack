@@ -145,8 +145,12 @@ fn vc_runtime_installed() -> bool {
     })
 }
 
-#[tauri::command]
-fn relaunch_as_admin() -> Result<(), String> {
+/// Starts an elevated DevStack and exits this one, so two instances (two tray icons, both
+/// stopping services on close) never run side by side. `app.exit` skips CloseRequested, so
+/// the services keep running for the new instance to adopt. Off the main thread: the UAC
+/// prompt blocks until answered.
+#[tauri::command(async)]
+fn relaunch_as_admin(app: tauri::AppHandle) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
         if is_app_elevated() {
@@ -159,10 +163,13 @@ fn relaunch_as_admin() -> Result<(), String> {
             .map(|arg| quote_windows_arg(&arg))
             .collect::<Vec<_>>()
             .join(" ");
-        shell_execute("runas", &exe.to_string_lossy(), Some(&args), None, 1)
+        shell_execute("runas", &exe.to_string_lossy(), Some(&args), None, 1)?;
+        app.exit(0);
+        Ok(())
     }
     #[cfg(not(target_os = "windows"))]
     {
+        let _ = app;
         Err("Administrator relaunch is only supported on Windows".into())
     }
 }
@@ -694,19 +701,13 @@ async fn check_app_update(app: tauri::AppHandle, state: tauri::State<'_, AppStat
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn open_external_target(target: String) -> Result<(), String> {
+    // ShellExecute, not `cmd /C start`: cmd treats `&`, `|` and `^` in a URL as commands.
     #[cfg(target_os = "windows")]
     {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x08000000;
-
-        Command::new("cmd")
-            .args(["/C", "start", "", &target])
-            .creation_flags(CREATE_NO_WINDOW)
-            .spawn()
-            .map_err(|e| e.to_string())?;
-        return Ok(());
+        const SW_SHOWNORMAL: i32 = 1;
+        return shell_execute("open", &target, None, None, SW_SHOWNORMAL);
     }
 
     #[cfg(target_os = "macos")]
@@ -2477,27 +2478,27 @@ fn scan_processes(state: tauri::State<'_, AppState>, dev_dir: String) -> Vec<ser
     
     use std::collections::HashMap;
     let mut groups: HashMap<String, serde_json::Value> = HashMap::new();
-    let dev_dir_low = dev_dir.to_lowercase().replace("/", "\\");
+    // Only binaries inside this DevStack folder (with a trailing separator, so `F:\devstack2`
+    // or an old install folder elsewhere never count as ours).
+    let Some(dev_prefix) = dir_prefix(&dev_dir) else { return Vec::new() };
 
     for (pid, process) in sys.processes() {
         let name = process.name().to_str().unwrap_or("").to_lowercase();
         let exe_path = process.exe().map(|p| p.to_string_lossy().into_owned()).unwrap_or_default();
         let exe_low = exe_path.to_lowercase();
         
-        let is_ds = exe_low.starts_with(&dev_dir_low) || 
-                    exe_low.contains("\\dev-stack\\") || 
-                    exe_low.contains("\\devstack\\");
+        if !exe_low.starts_with(&dev_prefix) { continue; }
 
-        // ONLY proceed if it's a DevStack process
-        if !is_ds { continue; }
-
-        let svc_type = if name.contains("mysqld") { Some("db") }
-                      else if name.contains("httpd") || name.contains("apache") { Some("web") }
-                      else if name.contains("redis") { Some("cache") }
-                      else if name.contains("mailpit") { Some("mail") }
-                      else if name.contains("minio") { Some("storage") }
-                      else if name.contains("php") { Some("php") }
-                      else { None };
+        // Exact server binaries: redis-cli.exe or mysql.exe in a DevStack terminal is not the server.
+        let svc_type = match name.as_str() {
+            "mysqld.exe" => Some("db"),
+            "httpd.exe" => Some("web"),
+            "redis-server.exe" => Some("cache"),
+            "mailpit.exe" => Some("mail"),
+            "minio.exe" => Some("storage"),
+            "php-cgi.exe" | "php.exe" => Some("php"),
+            _ => None,
+        };
         
         if let Some(t) = svc_type {
             let memory = process.memory() as f64 / 1024.0 / 1024.0;
@@ -2828,6 +2829,22 @@ async fn install_binary(
         }
         if ini_path.exists() && patch_php_ini_extensions(ini_path.to_string_lossy().to_string()) {
             emit_log("Applied DevStack PHP defaults (extensions, memory/upload limits).");
+        }
+        // Without the matching Visual C++ runtime php.exe cannot even start; say so now
+        // instead of letting the FastCGI pools crash later without a reason.
+        let output = crate::site_config::hidden_command(dest_path.join("php.exe")).args(["-n", "-v"]).output();
+        match output {
+            Ok(out) if out.status.success() => {
+                emit_log(String::from_utf8_lossy(&out.stdout).lines().next().unwrap_or("PHP OK"));
+            }
+            Ok(out) => {
+                let code = out.status.code().unwrap_or(0) as u32;
+                return Err(format!(
+                    "PHP {version} was installed but does not start (exit code {code:#X}). Install the latest Microsoft Visual C++ Redistributable (x64) and try again. {}",
+                    String::from_utf8_lossy(&out.stderr).trim()
+                ));
+            }
+            Err(e) => return Err(format!("PHP {version} was installed but php.exe cannot be run: {e}")),
         }
     } else if svc_type == "web" {
         ensure_apache_log_files(dest_path.to_string_lossy().to_string())?;

@@ -4,13 +4,11 @@ import { Trash2, RefreshCw } from 'lucide-react';
 import ProjectLogs from './ProjectLogs';
 
 const PageLogs = () => {
-  const { logs, currentLog, switchLog, clearLog, showToast, t, fetchServiceLogs, streamServiceLogs } = useStore();
+  const { logs, procLogs, currentLog, switchLog, clearLog, showToast, t, fetchServiceLogs, streamServiceLogs } = useStore();
   const scrollRef = useRef(null);
+  // Follow new lines only while the view is at the bottom, so older lines can be read.
+  const followRef = useRef(true);
   const [projectMode, setProjectMode] = useState(false);
-
-  useEffect(() => {
-    if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-  }, [logs, currentLog]);
 
   useEffect(() => {
     // Ensure streaming setup when landing on logs page
@@ -21,13 +19,27 @@ const PageLogs = () => {
     { id: 'apache', label: 'Apache' },
     { id: 'mysql', label: 'MySQL' },
     { id: 'php', label: 'PHP' },
+    { id: 'redis', label: 'Redis' },
+    { id: 'mail', label: 'Mail' },
+    { id: 'storage', label: 'MinIO' },
   ];
 
-  const currentLines = logs[currentLog] || [];
+  // MinIO runs under the process manager: its own output is part of its log.
+  const currentLines = currentLog === 'storage'
+    ? [...(logs.storage || []), ...(procLogs.minio || [])]
+    : logs[currentLog] || [];
+
+  useEffect(() => {
+    followRef.current = true;
+  }, [currentLog]);
+
+  useEffect(() => {
+    if (scrollRef.current && followRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+  }, [currentLines[currentLines.length - 1], currentLog]); // the last line: the list is capped, so its length stops changing
 
   const getLogClass = (level) => {
     switch (level) {
-      case 'success': return 'text-accent';
+      case 'success': case 'ok': return 'text-accent';
       case 'warn': return 'text-warn';
       case 'err': case 'danger': return 'text-danger';
       case 'info': return 'text-info font-medium';
@@ -42,20 +54,24 @@ const PageLogs = () => {
 
         <div className="flex bg-panel border border-border rounded-lg overflow-hidden">
           {tabs.map(tab => (
-            <div
+            <button
+              type="button"
               key={tab.id}
+              aria-pressed={!projectMode && currentLog === tab.id}
               onClick={() => { setProjectMode(false); switchLog(tab.id); }}
               className={`tab px-4 py-1.5 cursor-pointer text-[12px] font-bold ${!projectMode && currentLog === tab.id ? 'bg-accent/10 text-accent border-b-2 border-accent' : 'text-muted hover:text-textDim'}`}
             >
               {tab.label}
-            </div>
+            </button>
           ))}
-          <div
+          <button
+            type="button"
+            aria-pressed={projectMode}
             onClick={() => setProjectMode(true)}
             className={`tab px-4 py-1.5 cursor-pointer text-[12px] font-bold ${projectMode ? 'bg-accent/10 text-accent border-b-2 border-accent' : 'text-muted hover:text-textDim'}`}
           >
             {t('projectLogs')}
-          </div>
+          </button>
         </div>
 
         <div className={`flex items-center gap-2 ${projectMode ? 'hidden' : ''}`}>
@@ -151,6 +167,7 @@ const PageLogs = () => {
 
       {projectMode ? <ProjectLogs /> : <div
         ref={scrollRef}
+        onScroll={(e) => { const el = e.currentTarget; followRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40; }}
         className="flex-1 overflow-y-auto overflow-x-hidden p-5 px-6 bg-[#0a0b0d] font-mono text-[12px] leading-relaxed whitespace-pre-wrap break-words"
       >
         {currentLines.length === 0 ? (

@@ -180,8 +180,16 @@ pub fn cloudflare_is_authenticated() -> Result<bool, String> {
     Ok(cloudflare_dir()?.join("cert.pem").is_file())
 }
 
-#[tauri::command(async)]
-pub fn cloudflare_login(executable: String) -> Result<String, String> {
+/// Waits until the user finishes the browser login (minutes), so it runs on a blocking
+/// thread: an `(async)` command would hold one of the few async workers the whole time.
+#[tauri::command]
+pub async fn cloudflare_login(executable: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || cloudflare_login_blocking(executable))
+        .await
+        .map_err(|error| error.to_string())?
+}
+
+fn cloudflare_login_blocking(executable: String) -> Result<String, String> {
     std::fs::create_dir_all(cloudflare_dir()?).map_err(|error| error.to_string())?;
     let output = run_cloudflared(&executable, &["tunnel", "login"])?;
     ensure_success(output, "authenticate this computer")?;

@@ -263,7 +263,8 @@ function siteBody(site, ssl) {
             'RewriteEngine On',
             'RewriteCond %{HTTP:Upgrade} websocket [NC]',
             `RewriteRule ^/?(.*) ws://127.0.0.1:${port}/$1 [P,L]`,
-            `ProxyPass / http://127.0.0.1:${port}/`,
+            // retry=0: a request made before Vite is up must not keep the backend in error for 60 s.
+            `ProxyPass / http://127.0.0.1:${port}/ retry=0`,
             `ProxyPassReverse / http://127.0.0.1:${port}/`,
         ];
     }

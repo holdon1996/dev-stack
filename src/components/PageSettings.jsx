@@ -73,16 +73,19 @@ const PageSettings = () => {
 
     if (activeApache) {
       const serverRoot = `${dsDir}/bin/apache/apache-${activeApache.version}`;
-      invoke('patch_apache_paths', {
-        newServerRoot: serverRoot,
-        newDocRoot: docRoot,
-        port: parseInt(settings.port80) || 80,
-      }).then((path) => {
-        showToast(`✓ Apache config synced: ${path}`, 'ok');
-      }).catch(err => {
+      // Awaited: the port update below restarts Apache, which must see the patched config,
+      // and "saved" must not be reported when the patch failed.
+      try {
+        await invoke('patch_apache_paths', {
+          newServerRoot: serverRoot,
+          newDocRoot: docRoot,
+          port: parseInt(settings.port80) || 80,
+        });
+      } catch (err) {
         console.error('patch_apache_paths failed:', err);
         showToast(t('apacheConfigError', { error: err }), 'danger');
-      });
+        return;
+      }
     } else {
       showToast(t('noApacheVersionToPatch'), 'warn');
     }

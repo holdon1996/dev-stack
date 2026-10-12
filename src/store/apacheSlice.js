@@ -2,7 +2,8 @@ import { getApacheDir, getPhpDir } from '../lib/paths';
 
 const getApacheVersionFromFolder = (folderName) => {
     const normalized = folderName.trim().toLowerCase();
-    const match = normalized.match(/(?:^|apache-)(\d+(?:\.\d+)+)/);
+    // Whole name only: `apache-2.4.66.tmp_extract` or `apache-2.4.66.old` is not an install.
+    const match = normalized.match(/^(?:apache-)?(\d+(?:\.\d+)+)$/);
     return match?.[1] || null;
 };
 
@@ -20,7 +21,11 @@ export const createApacheSlice = (set, get) => ({
             const baseDir = get().settings.devStackDir.replace(/[\\\/]+$/, '');
             const apacheBinBase = `${baseDir}/bin/apache`;
 
-            const folders = await invoke('list_subdirs', { path: apacheBinBase });
+            const all = await invoke('list_subdirs', { path: apacheBinBase });
+            // Complete installs only: a half-deleted folder without httpd.exe is not installed.
+            const folders = (await Promise.all(all.map(async f => (
+                getApacheVersionFromFolder(f) && await invoke('path_exists', { path: `${apacheBinBase}/${f}/bin/httpd.exe` }) ? f : null
+            )))).filter(Boolean);
             set(s => {
                 const currentList = [...s.apacheVersions];
                 const consumed = new Set();
@@ -53,20 +58,6 @@ export const createApacheSlice = (set, get) => ({
         } catch (e) {
             console.error('scanInstalledApache failed:', e);
         }
-    },
-
-    detectApacheVersion: async () => {
-        try {
-            const { Command } = await import('@tauri-apps/plugin-shell');
-            const result = await Command.create('cmd', ['/C', 'httpd -v']).execute();
-            const match = result.stdout?.match(/Apache\/([\d.]+)/);
-            if (match) {
-                const detected = match[1];
-                set(s => ({
-                    apacheVersions: s.apacheVersions.map(v => v.version === detected ? { ...v, installed: true, active: true } : v)
-                }));
-            }
-        } catch { }
     },
 
     fetchApacheVersions: async () => {
@@ -190,16 +181,17 @@ export const createApacheSlice = (set, get) => ({
         }
     },
 
-    restartApache: async () => {
+    restartApache: () => get()._withService(1, async () => {
         const web = get().services.find(s => s.type === 'web');
         const apacheRoot = get()._activeApacheRoot();
         // Keep the running instance when the new config would not start.
         if (web?.status === 'running' && apacheRoot && !(await get()._apacheConfigOk(apacheRoot))) return false;
         // Starting while the old instance still holds :80 only fails with "could not bind".
-        if ((web?.status === 'running' || web?.pid) && !(await get().toggleService(1, 'stop'))) return false;
+        if ((web?.status === 'running' || web?.pid) && !(await get()._toggleService(1, 'stop'))) return false;
         await new Promise(r => setTimeout(r, 1000));
-        await get().toggleService(1, 'start');
-    },
+        await get()._toggleService(1, 'start');
+        return true;
+    }),
 
     installApacheVersion: async (version) => {
         const v = get().apacheVersions.find(av => av.version === version);

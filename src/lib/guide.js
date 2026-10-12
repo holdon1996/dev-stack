@@ -27,7 +27,8 @@ export function evaluateChecks(f) {
         { id: 'php', ok: f.phpActive, fix: { page: 'php' } },
         { id: 'mysql', ok: f.mysqlActive, fix: { page: 'database' } },
         { id: 'ports', ok: !(f.foreignPorts || []).length, params: { ports: (f.foreignPorts || []).join(', ') }, fix: { page: 'services' } },
-        { id: 'running', ok: f.apacheRunning && f.mysqlRunning, fix: { action: 'startCore' } },
+        // A developer may stop MySQL on purpose: a reminder, not a setup problem.
+        { id: 'running', ok: f.apacheRunning && f.mysqlRunning, optional: true, fix: { action: 'startCore' } },
         { id: 'mkcertCa', ok: f.mkcertCa, optional: !f.httpsSites, fix: { action: 'installCa' } },
         { id: 'caBundle', ok: f.caBundle, fix: { action: 'refreshCa' } },
         { id: 'node', ok: f.node, optional: true, fix: { page: 'node' } },

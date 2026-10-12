@@ -1,4 +1,4 @@
-import { getMysqlDir, getDevDir, getPhpDir } from '../lib/paths';
+import { getMysqlDir, getDevDir, getPhpDir, installedVersionFolders } from '../lib/paths';
 
 export const createMysqlSlice = (set, get) => ({
     mysqlVersions: [
@@ -13,13 +13,16 @@ export const createMysqlSlice = (set, get) => ({
             const baseDir = get().settings.devStackDir.replace(/[\\\/]+$/, '');
             const mysqlBinBase = `${baseDir}/bin/mysql`;
 
-            const folders = await invoke('list_subdirs', { path: mysqlBinBase });
+            const versions = await installedVersionFolders(invoke, mysqlBinBase, 'mysql', 'bin/mysqld.exe');
             set(s => {
                 const updatedList = s.mysqlVersions.map(v => {
-                    const found = folders.some(f => f.toLowerCase().includes(v.version.toLowerCase()));
+                    const found = versions.includes(v.version);
                     return { ...v, installed: found, active: found ? v.active : false };
                 });
-                return { mysqlVersions: updatedList };
+                const added = versions
+                    .filter(version => !updatedList.some(v => v.version === version))
+                    .map(version => ({ version, installed: true, active: false, installing: false }));
+                return { mysqlVersions: [...updatedList, ...added] };
             });
         } catch (e) {
             console.error('scanInstalledMysql failed:', e);
@@ -77,9 +80,17 @@ export const createMysqlSlice = (set, get) => ({
         });
     },
 
-    installMysqlVersion: async (version) => {
+    installMysqlVersion: async (version, url) => {
+        // A custom version (its own download link) gets a list entry for the progress and log.
+        if (url && !get().mysqlVersions.some(mv => mv.version === version)) {
+            set(s => ({ mysqlVersions: [...s.mysqlVersions, { version, installed: false, active: false, installing: false, downloadUrl: url }] }));
+        }
         const v = get().mysqlVersions.find(mv => mv.version === version);
-        if (!v?.downloadUrl) return;
+        if (!v?.downloadUrl && !url) {
+            get().showToast(get().t('downloadUrlMissing', { name: `MySQL ${version}` }), 'danger');
+            return;
+        }
+        const downloadUrl = url || v.downloadUrl;
 
         set(s => ({
             mysqlVersions: s.mysqlVersions.map(mv => mv.version === version ? { ...mv, installing: true, progress: 0 } : mv),
@@ -109,7 +120,7 @@ export const createMysqlSlice = (set, get) => ({
             const result = await invoke('install_binary', {
                 svcType: 'db',
                 version,
-                url: v.downloadUrl,
+                url: downloadUrl,
                 destDir: mysqlDir,
                 expectedSizeMb: null
             });

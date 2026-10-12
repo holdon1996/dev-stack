@@ -10,7 +10,7 @@ const PageApache = () => {
   const {
     apacheVersions, apacheInstallLogs, apacheInstallProgress,
     installApacheVersion, uninstallApacheVersion,
-    detectApacheVersion, scanInstalledApache, fetchApacheVersions,
+    scanInstalledApache, fetchApacheVersions,
     setActiveApache, restartApache,
     settings, showToast, t,
     phpVersions, selectedPhpVersion,
@@ -20,9 +20,9 @@ const PageApache = () => {
   const logEndRef = React.useRef(null);
 
   useEffect(() => {
-    detectApacheVersion();
     scanInstalledApache();
-    fetchApacheVersions();
+    // Mark installs again once the fetched list (which may add versions) arrives.
+    fetchApacheVersions().finally(scanInstalledApache);
   }, []);
 
   useEffect(() => {
@@ -103,7 +103,7 @@ const PageApache = () => {
               )}
               <button
                 className="btn-ghost text-[11px] flex items-center gap-1.5"
-                onClick={async () => { await Promise.all([detectApacheVersion(), scanInstalledApache(), fetchApacheVersions()]); showToast(t('apacheListRefreshed'), 'ok'); }}
+                onClick={async () => { await Promise.all([scanInstalledApache(), fetchApacheVersions()]); showToast(t('apacheListRefreshed'), 'ok'); }}
               >
                 <RefreshCw size={11} /> {t('refresh')}
               </button>

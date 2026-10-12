@@ -29,6 +29,7 @@ test('required checks fail, optional ones only warn', () => {
     assert.equal(status.ports, 'fail');
     assert.equal(status.node, 'warn');
     assert.equal(status.mkcertCa, 'warn');
+    assert.equal(evaluateChecks({ ...good, mysqlRunning: false }).find(r => r.id === 'running').status, 'warn');
     assert.equal(rows.find(r => r.id === 'ports').params.ports, '80');
     assert.ok(!checklistDone(rows));
     assert.equal(evaluateChecks({ ...good, mkcertCa: false }).find(r => r.id === 'mkcertCa').status, 'fail');

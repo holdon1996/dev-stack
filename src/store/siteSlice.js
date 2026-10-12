@@ -34,10 +34,20 @@ export const createSiteSlice = (set, get) => ({
             .map(s => ({ key: s.key, path: s.path, cfg: siteConfigs[s.key] }));
     },
 
-    /** PHP install a FastCGI site runs on: its chosen version, else the active one. */
-    _sitePhp: (cfg) => cfg.phpVersion
-        ? get().phpVersions.find(v => v.version === cfg.phpVersion && v.installed)
-        : get().phpVersions.find(v => v.active && v.installed),
+    /**
+     * PHP install a FastCGI site runs on: its chosen version, else the active one. A version
+     * from a teammate's devstack.json that differs only in the patch level (8.3.31 here
+     * vs 8.3.30 installed) runs on the newest installed patch of that minor version.
+     */
+    _sitePhp: (cfg) => {
+        const installed = get().phpVersions.filter(v => v.installed);
+        if (!cfg.phpVersion) return installed.find(v => v.active);
+        const minor = (version) => version.split('.').slice(0, 2).join('.');
+        return installed.find(v => v.version === cfg.phpVersion)
+            || installed
+                .filter(v => minor(v.version) === minor(cfg.phpVersion))
+                .sort((a, b) => b.version.localeCompare(a.version, undefined, { numeric: true }))[0];
+    },
 
     /** Managed sites plus their php-cgi pool (`fcgi: { ports, php }`) when FastCGI applies. */
     _sitesWithFcgi: () => get()._managedSites().map(site => {
@@ -123,7 +133,9 @@ export const createSiteSlice = (set, get) => ({
                 return false;
             }
         }
-        const merged = { ...get().siteConfigs, ...configs };
+        // Configs of folders that were renamed or deleted must not block a domain or port.
+        const present = new Set([...get().sites.map(s => s.key), ...Object.keys(configs)]);
+        const merged = Object.fromEntries(Object.entries({ ...get().siteConfigs, ...configs }).filter(([key]) => present.has(key)));
         const conflicts = findHostConflicts(
             Object.entries(merged).filter(([, cfg]) => cfg.managed).map(([key, cfg]) => ({ key, cfg }))
         );
@@ -262,7 +274,9 @@ export const createSiteSlice = (set, get) => ({
     /** Writes the managed sites of `group` (all managed sites when empty) to a `devstack.json`. */
     exportProjectManifest: async (group = '') => {
         const { t, showToast, siteConfigs } = get();
-        const keys = Object.keys(siteConfigs).filter(k => siteConfigs[k].managed && (!group || siteConfigs[k].group === group));
+        // Only folders that still exist: a renamed or deleted project is not part of the team setup.
+        const present = new Set(get().sites.map(s => s.key));
+        const keys = Object.keys(siteConfigs).filter(k => present.has(k) && siteConfigs[k].managed && (!group || siteConfigs[k].group === group));
         if (!keys.length) {
             showToast(t('manifestNoSites'), 'warn');
             return false;
@@ -290,7 +304,23 @@ export const createSiteSlice = (set, get) => ({
         const cfg = get().siteConfigs[site.key]?.managed ? get().siteConfigs[site.key] : await get().detectSiteConfig(site);
         const ok = await get().saveSiteConfig(site.key, cfg);
         if (ok) get().showToast(get().t('siteApplied', { domain: cfg.domain }), 'ok');
+        if (ok && cfg.type === 'proxy') await get()._warnViteAllowedHosts(site, cfg);
         return ok;
+    },
+
+    /** Vite 5.4.12+ / 6.0.9+ answers "Blocked request" for a domain missing from server.allowedHosts. */
+    _warnViteAllowedHosts: async (site, cfg) => {
+        const { invoke } = await import('@tauri-apps/api/core');
+        for (const ext of ['js', 'ts', 'mjs', 'mts', 'cjs']) {
+            const text = await invoke('read_text_file', { path: `${win(site.path)}\\vite.config.${ext}` }).catch(() => null);
+            if (text === null) continue;
+            if (!/allowedHosts/.test(text)) {
+                get().showToast(get().t('viteAllowedHostsWarn', { domain: cfg.domain }), 'warn', {
+                    action: { label: get().t('guideHowToFix'), guide: 'recipe-vite' },
+                });
+            }
+            return;
+        }
     },
 
     /** Drops DevStack's config for a deleted project and removes its vhost and hosts lines. */

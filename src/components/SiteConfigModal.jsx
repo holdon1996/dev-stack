@@ -221,6 +221,10 @@ const SiteConfigModal = ({ site, onClose }) => {
                   >
                     <option value="">{t('phpActiveFastcgi', { version: phpVersions.find(v => v.active && v.installed)?.version || '?' })}</option>
                     {phpVersions.filter(v => v.installed).map(v => <option key={v.version} value={v.version}>{t('phpFastcgiOption', { version: v.version })}</option>)}
+                    {/* A version from devstack.json that is not installed here: show it instead of a wrong selection. */}
+                    {draft.phpVersion && !phpVersions.some(v => v.installed && v.version === draft.phpVersion) && (
+                      <option value={draft.phpVersion}>{t('phpVersionNotInstalledOption', { version: draft.phpVersion })}</option>
+                    )}
                     <option value="module">{t('phpGlobalModule')}</option>
                   </select>
                 </Field>

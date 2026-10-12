@@ -12,8 +12,8 @@ const icons = {
 };
 
 const Toast = () => {
-  const { toast, setActivePage, openGuide } = useStore(useShallow(s => ({
-    toast: s.toast, setActivePage: s.setActivePage, openGuide: s.openGuide,
+  const { toast, setActivePage, openGuide, dismissToast, t } = useStore(useShallow(s => ({
+    toast: s.toast, setActivePage: s.setActivePage, openGuide: s.openGuide, dismissToast: s.dismissToast, t: s.t,
   })));
 
   if (!toast.show) return null;
@@ -25,7 +25,7 @@ const Toast = () => {
 
   return (
     <div
-      role="status"
+      role={toast.type === 'danger' ? 'alert' : 'status'}
       className={`fixed bottom-6 right-6 max-w-[520px] bg-surface border ${current.border} rounded-xl px-4.5 py-3 text-[13px] font-semibold text-text z-[200] shadow-glow flex items-center gap-2.5 transition-all duration-300 animate-in`}
     >
       <Icon size={16} className={`${current.color} shrink-0`} />
@@ -35,6 +35,9 @@ const Toast = () => {
           {action.label} <ArrowRight size={11} />
         </button>
       )}
+      <button type="button" className="btn-ghost p-1 shrink-0" onClick={dismissToast} aria-label={t('close')} title={t('close')}>
+        <X size={13} />
+      </button>
     </div>
   );
 };

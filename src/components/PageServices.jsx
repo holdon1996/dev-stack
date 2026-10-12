@@ -185,8 +185,11 @@ const ServiceRow = ({ service }) => {
             <Power size={14} />
           </button>
           <button
-            className="p-2 text-muted hover:text-accent transition-colors rounded-lg hover:bg-white/5"
+            type="button"
+            className="p-2 text-muted hover:text-accent transition-colors rounded-lg hover:bg-white/5 disabled:opacity-40"
             title={useStore.getState().t('restartServiceTitle')}
+            aria-label={useStore.getState().t('restartServiceTitle')}
+            disabled={service.status === 'starting' || service.status === 'stopping'}
             onClick={() => toggleService(service.id, 'restart')}
           >
             <RotateCcw size={14} />
@@ -292,8 +295,12 @@ const FcgiPools = () => {
 /** Shown until the first-run checklist passes (or the user hides it): the way into the Guide. */
 const FirstRunBanner = () => {
   const { guideChecks, guideDismissed, runGuideChecks, openGuide, dismissGuideBanner, t } = useStore();
-  // initApp runs the first check once auto-started services settle; later visits refresh it.
-  React.useEffect(() => { if (!guideDismissed && useStore.getState().guideChecks.length) runGuideChecks(); }, []);
+  // initApp runs the first check once auto-started services settle; later visits refresh it,
+  // and so does Apache or MySQL settling after a Start/Stop (the banner reflects it at once).
+  const coreStatus = useStore(s => s.services.filter(x => x.type === 'web' || x.type === 'db').map(x => x.status).join());
+  React.useEffect(() => {
+    if (!guideDismissed && useStore.getState().guideChecks.length && !/starting|stopping/.test(coreStatus)) runGuideChecks();
+  }, [coreStatus]);
   const failing = guideChecks.filter(c => c.status === 'fail');
   if (guideDismissed || !failing.length) return null;
   return (
@@ -310,7 +317,7 @@ const FirstRunBanner = () => {
 };
 
 const PageServices = () => {
-  const { startAll, stopAll, showToast, t, startTime, services, systemStats, isElevated } = useStore();
+  const { startAll, stopAll, bulkAction, t, startTime, services, systemStats, isElevated } = useStore();
   const { cpu, ram } = systemStats;
   const [now, setNow] = React.useState(Date.now());
 
@@ -355,10 +362,10 @@ const PageServices = () => {
               </button>
             ))}
           </div>
-          <button className="btn-ghost flex items-center gap-2" onClick={async () => { await startAll(); showToast(t('startingAllServices'), 'ok'); }}>
+          <button type="button" className="btn-ghost flex items-center gap-2" disabled={!!bulkAction} onClick={startAll}>
             <Play size={14} /> {t('startAll') || 'Start All'}
           </button>
-          <button className="btn-danger flex items-center gap-2" onClick={async () => { await stopAll(); showToast(t('stoppingAllServices'), 'warn'); }}>
+          <button type="button" className="btn-danger flex items-center gap-2" disabled={!!bulkAction} onClick={stopAll}>
             <Pause size={14} /> {t('stopAll') || 'Stop All'}
           </button>
         </div>

@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useStore } from '../store';
 import { Check, Download, Loader, Terminal, Search, Plus, X, Trash2, RefreshCw, AlertTriangle, ShieldAlert } from 'lucide-react';
 import { ask } from '@tauri-apps/plugin-dialog';
+import { phpDownloadUrl } from '../lib/php';
 
 // Popular PHP extensions catalog for suggestions
 const EXT_CATALOG = [
@@ -35,7 +36,8 @@ const PagePHP = () => {
     detectPhpVersion();
     scanInstalledPhp();
     syncExtensionsFromActivePhp();
-    fetchPhpVersions();
+    // Mark installs again once the fetched list (which may add versions) arrives.
+    fetchPhpVersions().finally(scanInstalledPhp);
   }, []);
   useEffect(() => {
     logEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -134,7 +136,15 @@ const PagePHP = () => {
                 disabled={!customTag.trim()}
                 onClick={async () => {
                   const tag = customTag.trim();
-                  if (!tag) return;
+                  if (!/^\d+\.\d+\.\d+$/.test(tag)) {
+                    showToast(t('customVersionPattern'), 'warn');
+                    return;
+                  }
+                  // Reinstalling over a working version is not what "install by tag" is for.
+                  if (phpVersions.some(p => p.version === tag && p.installed)) {
+                    showToast(t('phpAlreadyInstalled', { version: tag }), 'warn');
+                    return;
+                  }
 
                   // 1. Try to find the version in our freshly scraped list (highly accurate)
                   const matched = phpVersions.find(p => p.version === tag);
@@ -144,19 +154,8 @@ const PagePHP = () => {
                   if (matched?.downloadUrl) {
                     url = matched.downloadUrl;
                   } else {
-                    // 2. Pattern fallback if not found in scraper
-                    const parts = tag.split('.');
-                    const major = parseInt(parts[0]);
-                    const minor = parseInt(parts[1]);
-                    const isNts = false; // Prioritize TS for Apache compatibility
-                    const ntsSuffix = isNts ? "-nts" : "";
-
-                    if (major === 8 && minor >= 3) {
-                      url = `https://windows.php.net/downloads/releases/php-${tag}${ntsSuffix}-Win32-${major === 8 && minor === 4 ? 'vs17' : 'vs16'}-x64.zip`;
-                    } else {
-                      url = `https://downloads.php.net/~windows/releases/archives/php-${tag}${ntsSuffix}-Win32-vs16-x64.zip`;
-                      if (major === 7) url = `https://downloads.php.net/~windows/releases/archives/php-${tag}${ntsSuffix}-Win32-vc15-x64.zip`;
-                    }
+                    // 2. Official thread-safe build (the Apache module needs TS; php-cgi works with it too)
+                    url = phpDownloadUrl(tag);
                   }
 
                   await installCustomPhp(tag, url);

@@ -1,4 +1,4 @@
-import { getPhpDir, getBinDir } from '../lib/paths';
+import { getPhpDir, getBinDir, installedVersionFolders } from '../lib/paths';
 import { usesFcgi } from '../lib/sites';
 
 export const createPhpSlice = (set, get) => ({
@@ -32,14 +32,18 @@ export const createPhpSlice = (set, get) => ({
             const baseDir = get().settings.devStackDir.replace(/[\\\/]+$/, '');
             const phpBinBase = `${baseDir}/bin/php`;
 
-            const folders = await invoke('list_subdirs', { path: phpBinBase });
+            const versions = await installedVersionFolders(invoke, phpBinBase, 'php', 'php.exe');
             set(s => {
                 const updatedList = s.phpVersions.map(p => {
-                    const found = folders.some(f => f.includes(p.version));
+                    const found = versions.includes(p.version);
                     const url = p.downloadUrl || get()._phpFallbacks[p.version];
                     return { ...p, installed: found, active: found ? p.active : false, downloadUrl: url };
                 });
-                return { phpVersions: updatedList };
+                // Installed versions the list does not know (custom installs, a copied devstack folder).
+                const added = versions
+                    .filter(version => !updatedList.some(p => p.version === version))
+                    .map(version => ({ version, installed: true, active: false, installing: false, threadSafe: true }));
+                return { phpVersions: [...updatedList, ...added].sort((a, b) => b.version.localeCompare(a.version, undefined, { numeric: true })) };
             });
             await get().syncExtensionsFromActivePhp();
         } catch (e) {
@@ -276,7 +280,11 @@ export const createPhpSlice = (set, get) => ({
 
     installCustomPhp: async (version, url) => {
         set(s => ({
-            phpVersions: s.phpVersions.map(pv => pv.version === version ? { ...pv, installing: true, progress: 0 } : pv),
+            // A version the list does not know yet gets an entry, so its spinner and progress show.
+            phpVersions: (s.phpVersions.some(pv => pv.version === version)
+                ? s.phpVersions
+                : [...s.phpVersions, { version, installed: false, active: false, installing: false, downloadUrl: url, threadSafe: true }]
+            ).map(pv => pv.version === version ? { ...pv, installing: true, progress: 0 } : pv),
             phpInstallLogs: [
                 { t: new Date().toLocaleTimeString(), m: `Starting custom install for PHP ${version}...`, l: 'info' },
                 { t: new Date().toLocaleTimeString(), m: `Attempting URL: ${url}`, l: 'info' }
@@ -347,7 +355,7 @@ export const createPhpSlice = (set, get) => ({
             return false;
         }
         // A site pinned to this version runs php-cgi from its folder: the files are locked.
-        const users = get()._managedSites().filter(s => usesFcgi(s.cfg) && s.cfg.phpVersion === version).map(s => s.key);
+        const users = get()._managedSites().filter(s => usesFcgi(s.cfg) && s.cfg.phpVersion && get()._sitePhp(s.cfg)?.version === version).map(s => s.key);
         if (users.length) {
             showToast(t('uninstallPhpInUse', { version, sites: users.join(', ') }), 'warn');
             return false;

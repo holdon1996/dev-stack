@@ -40,6 +40,9 @@ export const createUiSlice = (set, get) => ({
 
     /** `action`: optional `{ label, page }` or `{ label, guide: '<anchor>' }` button (e.g. "How to fix"). */
     showToast: (msg, type = 'ok', { action } = {}) => {
+        // An error stays readable: a following progress or success message must not replace it.
+        const current = get().toast;
+        if (current.show && current.type === 'danger' && type !== 'danger') return;
         // A newer toast must not be hidden by the previous toast's timer.
         clearTimeout(toastTimer);
         set({ toast: { show: true, msg, type, action } });
@@ -47,6 +50,11 @@ export const createUiSlice = (set, get) => ({
         toastTimer = setTimeout(() => {
             set({ toast: { show: false, msg: '', type: 'ok' } });
         }, type === 'danger' || action ? 9000 : 5000);
+    },
+
+    dismissToast: () => {
+        clearTimeout(toastTimer);
+        set({ toast: { show: false, msg: '', type: 'ok' } });
     },
 
     setDownloading: (val) => set({ isDownloading: val }),

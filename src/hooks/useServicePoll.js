@@ -19,8 +19,9 @@ export function useServicePoll() {
         // A poll is in flight: the visibility handler must not start a second loop.
         let busy = false;
         const schedule = (ms) => {
+            if (cancelled) return; // a newer effect owns timerRef now
             clearTimeout(timerRef.current);
-            if (!cancelled) timerRef.current = setTimeout(runPoll, ms);
+            timerRef.current = setTimeout(runPoll, ms);
         };
 
         const runPoll = async () => {

@@ -6,6 +6,9 @@ const getVersionFromServicePath = (path, prefix) => {
     return match?.[1] || null;
 };
 
+// Services with an action in progress (see `_withService`).
+const busyServices = new Set();
+
 export const createServiceSlice = (set, get) => ({
     services: [
         { id: 1, name: 'Apache (DevStack)', type: 'web', version: '—', port: 80, status: 'stopped', pid: null, memory: '—' },
@@ -107,16 +110,36 @@ export const createServiceSlice = (set, get) => ({
         }
     },
 
+    /** 'start' / 'stop' while Start All / Stop All runs (their buttons are disabled). */
+    bulkAction: null,
+
     startAll: async () => {
-        for (const svc of get().services) {
-            if (svc.type === 'php' || svc.status === 'running') continue;
-            if (!(await get()._serviceInstalled(svc))) continue;
-            await get().toggleService(svc.id);
+        if (get().bulkAction) return;
+        set({ bulkAction: 'start' });
+        get().showToast(get().t('startingAllServices'), 'info');
+        try {
+            // In parallel, like the auto-start: one slow or crashing service no longer holds
+            // up the others. Services the user runs externally are left alone.
+            const starts = [];
+            for (const svc of get().services) {
+                if (svc.type === 'php' || svc.status === 'running' || svc.useExternal) continue;
+                if (await get()._serviceInstalled(svc)) starts.push(get().toggleService(svc.id));
+            }
+            await Promise.allSettled(starts);
+        } finally {
+            set({ bulkAction: null });
         }
     },
     stopAll: async () => {
-        for (const svc of get().services) {
-            if (svc.type !== 'php' && svc.status === 'running') await get().toggleService(svc.id, 'stop');
+        if (get().bulkAction) return;
+        set({ bulkAction: 'stop' });
+        get().showToast(get().t('stoppingAllServices'), 'warn');
+        try {
+            await Promise.allSettled(get().services
+                .filter(svc => svc.type !== 'php' && svc.status === 'running')
+                .map(svc => get().toggleService(svc.id, 'stop')));
+        } finally {
+            set({ bulkAction: null });
         }
     },
 
@@ -196,7 +219,9 @@ export const createServiceSlice = (set, get) => ({
                                 version: svc.type === 'mail' ? (s.settings.mailpitVersion || proc.version || svc.version) : (proc.version || svc.version),
                                 memory: proc.memory + ' MB',
                                 path: proc.path,
-                                portConflict: false
+                                portConflict: false,
+                                // The process is up; whether it accepts connections yet is separate.
+                                listening: !!conflicts[i],
                             };
                         }
 
@@ -235,7 +260,7 @@ export const createServiceSlice = (set, get) => ({
         const owners = Object.fromEntries(await Promise.all(lookups));
         set(s => ({
             services: s.services.map(svc => {
-                if (!svc.portConflict || svc.status === 'running') return svc.portOwner ? { ...svc, portOwner: null } : svc;
+                if (!svc.portConflict || svc.status === 'running' || svc.useExternal) return svc.portOwner ? { ...svc, portOwner: null } : svc;
                 return svc.id in owners ? { ...svc, portOwner: owners[svc.id] || null } : svc;
             }),
         }));
@@ -322,7 +347,37 @@ export const createServiceSlice = (set, get) => ({
         }
     },
 
+    /**
+     * Runs `fn` as the only action on service `id`: double clicks, Start All during
+     * auto-start and Restart while starting used to launch a second httpd/mysqld. A thrown
+     * error is reported, and the row never stays spinning. Returns false when busy.
+     */
+    _withService: async (id, fn) => {
+        if (busyServices.has(id)) return false;
+        busyServices.add(id);
+        try {
+            return await fn();
+        } catch (e) {
+            const name = get().services.find(s => s.id === id)?.name || '';
+            get().showToast(get().t('serviceActionFailed', { name, error: `${e}` }), 'danger');
+            console.error('service action failed:', e);
+            return false;
+        } finally {
+            busyServices.delete(id);
+            set(s => ({
+                services: s.services.map(sv => sv.id === id && (sv.status === 'starting' || sv.status === 'stopping')
+                    ? { ...sv, status: sv.pid ? 'running' : 'stopped' }
+                    : sv),
+            }));
+        }
+    },
+
     toggleService: async (id, action) => {
+        if (action === 'restart' && get().services.find(s => s.id === id)?.type === 'web') return get().restartApache();
+        return get()._withService(id, () => get()._toggleService(id, action));
+    },
+
+    _toggleService: async (id, action) => {
         const t0 = performance.now();
         const svc = get().services.find(s => s.id === id);
         if (!svc) return;
@@ -332,20 +387,14 @@ export const createServiceSlice = (set, get) => ({
             return;
         }
 
-        if (action === 'restart' && svc.type === 'web') {
-            await get().restartApache();
-            return;
-        }
-
         if (action === 'restart') {
             const isRunning = svc.status === 'running' || svc.pid;
             get().showToast(get().t('restarting', { name: svc.name }) || `Restarting ${svc.name}...`, 'info');
             if (isRunning) {
-                if (!(await get().toggleService(id, 'stop'))) return;
+                if (!(await get()._toggleService(id, 'stop'))) return false;
                 await new Promise(r => setTimeout(r, 500));
             }
-            await get().toggleService(id, 'start');
-            return;
+            return get()._toggleService(id, 'start');
         }
 
         let activeVer = svc.version;
@@ -372,7 +421,6 @@ export const createServiceSlice = (set, get) => ({
 
             const t1 = performance.now();
             if (svc.type === 'storage') await invoke('proc_stop', { id: 'minio' });
-            if (svc.type === 'web') await get().stopFcgiPools();
             const killed = await invoke('kill_process_by_name_exact', { name });
             if (svc.type === 'php') await invoke('kill_process_by_name_exact', { name: 'php.exe' });
             console.log(`[Timer] Native Rust kill done in ${(performance.now() - t1).toFixed(2)}ms`);
@@ -389,6 +437,8 @@ export const createServiceSlice = (set, get) => ({
             console.log(`[Timer] Total Stop Time: ${(performance.now() - t0).toFixed(2)}ms`);
 
             if (success) {
+                // Only now: if httpd survived (UAC declined), its sites must keep their PHP.
+                if (svc.type === 'web') await get().stopFcgiPools();
                 get().showToast(`${svcLabel} stopped.`, 'ok');
                 get().addServiceLog(logType, `${svcLabel} stopped successfully.`, 'ok');
             } else {
@@ -408,7 +458,7 @@ export const createServiceSlice = (set, get) => ({
                 get().showToast(message, 'danger');
                 get().addServiceLog(logType, message, 'err');
                 set(s => ({ services: s.services.map(sv => sv.id === id ? { ...sv, portConflict: true, portOwner: owner } : sv) }));
-                return;
+                return false;
             }
             get().showToast(`Starting ${svcLabel}...`, 'info');
             get().addServiceLog(logType, `Starting ${svcLabel}...`, 'info');
@@ -429,7 +479,7 @@ export const createServiceSlice = (set, get) => ({
             if (started === false) {
                 get().addServiceLog(logType, `${svcLabel} failed to start.`, 'err');
                 set(s => ({ services: s.services.map(sv => sv.id === id ? { ...sv, status: 'stopped' } : sv) }));
-                return;
+                return false;
             }
 
             const success = await get()._pollUntilStable(id, 'running');
@@ -440,9 +490,15 @@ export const createServiceSlice = (set, get) => ({
                 get().showToast(`${svcLabel} is running.`, 'ok');
                 get().addServiceLog(logType, `${svcLabel} started successfully. PID: ${finalPid}`, 'ok');
             } else {
-                get().showToast(`${svcLabel} start timed out.`, 'danger');
-                get().addServiceLog(logType, `${svcLabel} start timed out or port conflict.`, 'err');
+                // No process left: it exited on startup (bad config, missing DLL, port taken).
+                const alive = !!get().services.find(s => s.id === id)?.pid;
+                const message = alive
+                    ? get().t('serviceNotAnswering', { name: svcLabel, port: svc.port })
+                    : get().t('serviceExited', { name: svcLabel });
+                get().showToast(message, 'danger', { action: { label: get().t('logs'), page: 'logs' } });
+                get().addServiceLog(logType, message, 'err');
             }
+            return success;
         }
     },
 
@@ -451,6 +507,7 @@ export const createServiceSlice = (set, get) => ({
         // Each delay >= 500ms ensures fresh process data on every poll
         const delays = [300, 500, 600, 800, 1000, 1000, 1500, 1500, 2000, 2000, 2000, 2000];
 
+        let seen = false;
         for (let i = 0; i < maxAttempts; i++) {
             // Give the OS a tiny fraction of time to spin up the process tree
             const delay = delays[i] || 1000;
@@ -458,7 +515,16 @@ export const createServiceSlice = (set, get) => ({
 
             await get().checkServicesRunning();
             const svc = get().services.find(s => s.id === id);
-            if (svc && svc.status === targetStatus) return true;
+            if (!svc) continue;
+            if (targetStatus !== 'running') {
+                if (svc.status === targetStatus) return true;
+                continue;
+            }
+            // A live process is not enough: it must also answer on its port.
+            if (svc.status === 'running' && (svc.listening || !(parseInt(svc.port) > 0))) return true;
+            seen ||= !!svc.pid;
+            // Gone again, or never appeared: it crashed on startup, so stop waiting.
+            if ((seen && !svc.pid) || (!seen && i >= 3)) break;
         }
 
         // Fallback if timed out: reset to stopped if it was starting, or running if it failed to stop
@@ -475,9 +541,20 @@ export const createServiceSlice = (set, get) => ({
     },
 
     updateServicePort: async (id, port) => {
-        const intPort = parseInt(port) || 0;
+        const { t, showToast } = get();
+        const intPort = Number(String(port).trim());
         const { invoke } = await import('@tauri-apps/api/core');
         const oldPort = parseInt(get().services.find(s => s.id === id)?.port) || 0;
+        if (!Number.isInteger(intPort) || intPort < 1 || intPort > 65535) {
+            showToast(t('portInvalid', { port }), 'warn');
+            return false;
+        }
+        if (intPort === oldPort) return true; // clicked into the field and out again: nothing to write
+        const clash = get().services.find(s => s.id !== id && parseInt(s.port) === intPort);
+        if (clash) {
+            showToast(t('portUsedByService', { port: intPort, name: clash.name }), 'warn');
+            return false;
+        }
 
         set(s => ({
             services: s.services.map(sv => sv.id === id ? { ...sv, port: intPort } : sv)
@@ -503,8 +580,14 @@ export const createServiceSlice = (set, get) => ({
         if (svc?.type === 'php') get().updateSettings({ portPHP: intPort });
         if (svc?.type === 'mail') get().updateSettings({ mailSmtpPort: intPort });
 
-        get().showToast(`Updated ${svc?.name} port to ${intPort} and saved to config`, 'ok');
+        // Apache restarts above; the others keep listening on the old port until restarted.
+        if (svc?.status === 'running' && svc.type !== 'web') {
+            showToast(t('portSavedRestart', { name: svc.name, port: intPort }), 'warn');
+        } else {
+            showToast(t('portSaved', { name: svc?.name, port: intPort }), 'ok');
+        }
         get().checkServicesRunning();
+        return true;
     },
 
     initApp: async () => {
