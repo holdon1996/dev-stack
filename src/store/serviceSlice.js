@@ -596,16 +596,15 @@ export const createServiceSlice = (set, get) => ({
             get().updateSettings({ autoStartMap: { ...(get().settings.autoStartMap || {}), 5: true } });
         }
         const autoMap = get().settings.autoStartMap || {};
-        get().services.forEach(svc => {
-            if (svc.type !== 'php' && autoMap[svc.id] === true && svc.status !== 'running') {
-                if (svc.portConflict) return; // Prevent infinite spinning
-                if (svc.type === 'mail' && !mailpitInstalled) return; // nothing to start; no toast at launch
-                get().toggleService(svc.id);
-            }
-        });
+        const autoStarts = get().services
+            .filter(svc => svc.type !== 'php' && autoMap[svc.id] === true && svc.status !== 'running')
+            .filter(svc => !svc.portConflict) // Prevent infinite spinning
+            .filter(svc => svc.type !== 'mail' || mailpitInstalled) // nothing to start; no toast at launch
+            .map(svc => get().toggleService(svc.id));
 
         get().showToast('DevStack ready', 'ok');
-        get().runGuideChecks();
+        // Checking while auto-started services are still "starting" flags them as not running.
+        Promise.allSettled(autoStarts).then(() => get().runGuideChecks());
         get().fetchServiceLogs('apache');
     },
 

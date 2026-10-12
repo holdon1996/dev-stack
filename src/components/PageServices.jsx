@@ -292,7 +292,7 @@ const FcgiPools = () => {
 /** Shown until the first-run checklist passes (or the user hides it): the way into the Guide. */
 const FirstRunBanner = () => {
   const { guideChecks, guideDismissed, runGuideChecks, openGuide, dismissGuideBanner, t } = useStore();
-  // initApp runs the first check once versions are scanned; later visits refresh it.
+  // initApp runs the first check once auto-started services settle; later visits refresh it.
   React.useEffect(() => { if (!guideDismissed && useStore.getState().guideChecks.length) runGuideChecks(); }, []);
   const failing = guideChecks.filter(c => c.status === 'fail');
   if (guideDismissed || !failing.length) return null;
