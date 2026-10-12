@@ -550,12 +550,16 @@ export const createSiteSlice = (set, get) => ({
         for (const id of ids) await get().stopProcess(id);
     },
 
-    /** Pool status for the Services page. */
-    fcgiPools: () => get()._sitesWithFcgi().filter(s => s.fcgi).map(site => ({
+    /**
+     * Pool status for the Services page: every managed FastCGI site, including ones
+     * without a pool yet (`missingPhp`: its PHP is not installed; no ports: not applied).
+     */
+    fcgiPools: () => get()._sitesWithFcgi().filter(s => usesFcgi(s.cfg)).map(site => ({
         key: site.key,
-        version: site.fcgi.php.version,
-        ports: site.fcgi.ports,
-        alive: site.fcgi.ports.filter(p => get().procs[get().fcgiProcessId(site.key, p)]?.running).length,
+        version: site.fcgi?.php.version || site.cfg.phpVersion || '',
+        missingPhp: !get()._sitePhp(site.cfg),
+        ports: site.fcgi?.ports || [],
+        alive: (site.fcgi?.ports || []).filter(p => get().procs[get().fcgiProcessId(site.key, p)]?.running).length,
     })),
 
     /** The pre-DevStack Hub workaround (manual vhost block + scripts/hub-fcgi.ps1) must go. */

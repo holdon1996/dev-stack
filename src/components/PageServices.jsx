@@ -246,10 +246,15 @@ const MinioPanel = () => {
 };
 
 const FcgiPools = () => {
-  const { fcgiPools, procs, t } = useStore();
+  const { fcgiPools, procs, setActivePage, t } = useStore();
   void procs; // re-render when pool processes change
   const pools = fcgiPools();
-  if (!pools.length) return null;
+  const status = (pool) => {
+    if (pool.missingPhp) return { text: t('fcgiPoolNoPhp'), cls: 'text-danger', page: 'php' };
+    if (!pool.ports.length) return { text: t('fcgiPoolNotApplied'), cls: 'text-warn', page: 'sites' };
+    const cls = pool.alive === pool.ports.length ? 'text-accent' : pool.alive ? 'text-warn' : 'text-danger';
+    return { text: t('fcgiPoolAlive', { alive: pool.alive, total: pool.ports.length }), cls };
+  };
   return (
     <div className="bg-surface border border-border rounded-xl p-4 mt-2">
       <div className="flex items-center gap-2 mb-1">
@@ -257,17 +262,28 @@ const FcgiPools = () => {
         <span className="text-[13px] font-bold">{t('fcgiPoolsTitle')}</span>
       </div>
       <div className="text-[11px] text-muted mb-3">{t('fcgiPoolsDesc')}</div>
+      {!pools.length && (
+        <div className="flex items-center gap-3 text-[12px] text-textDim">
+          <span className="flex-1">{t('fcgiPoolsEmpty')}</span>
+          <button type="button" className="btn-ghost text-[12px] py-1 px-2" onClick={() => setActivePage('sites')}>{t('virtualHosts')}</button>
+        </div>
+      )}
       <div className="flex flex-col gap-1.5">
-        {pools.map(pool => (
-          <div key={pool.key} className="grid grid-cols-[1fr_90px_90px_1fr] gap-3 items-center text-[12px]">
-            <span className="font-bold truncate" title={pool.key}>{pool.key}</span>
-            <span className="font-mono text-textDim">PHP {pool.version}</span>
-            <span className={`font-mono font-bold ${pool.alive === pool.ports.length ? 'text-accent' : pool.alive ? 'text-warn' : 'text-danger'}`}>
-              {t('fcgiPoolAlive', { alive: pool.alive, total: pool.ports.length })}
-            </span>
-            <span className="font-mono text-muted truncate">{pool.ports.join(', ')}</span>
-          </div>
-        ))}
+        {pools.map(pool => {
+          const st = status(pool);
+          return (
+            <div key={pool.key} className="grid grid-cols-[1fr_90px_minmax(90px,auto)_1fr] gap-3 items-center text-[12px]">
+              <span className="font-bold truncate" title={pool.key}>{pool.key}</span>
+              <span className="font-mono text-textDim">{pool.version ? `PHP ${pool.version}` : '-'}</span>
+              {st.page ? (
+                <button type="button" className={`font-mono font-bold text-left underline ${st.cls}`} onClick={() => setActivePage(st.page)}>{st.text}</button>
+              ) : (
+                <span className={`font-mono font-bold ${st.cls}`}>{st.text}</span>
+              )}
+              <span className="font-mono text-muted truncate">{pool.ports.join(', ')}</span>
+            </div>
+          );
+        })}
       </div>
     </div>
   );

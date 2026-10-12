@@ -1151,25 +1151,19 @@ fn kill_process_by_port_admin(port: u16) -> bool {
 }
 
 #[tauri::command]
-fn start_detached_process(executable: String, args: Vec<String>) -> bool {
+fn start_detached_process(executable: String, args: Vec<String>, cwd: Option<String>) -> bool {
+    let mut cmd = std::process::Command::new(executable);
+    cmd.args(args);
+    if let Some(dir) = cwd.filter(|d| !d.is_empty()) {
+        cmd.current_dir(dir);
+    }
     #[cfg(target_os = "windows")]
     {
         use std::os::windows::process::CommandExt;
         const CREATE_NO_WINDOW: u32 = 0x08000000;
-        
-        std::process::Command::new(executable)
-            .args(args)
-            .creation_flags(CREATE_NO_WINDOW)
-            .spawn()
-            .is_ok()
+        cmd.creation_flags(CREATE_NO_WINDOW);
     }
-    #[cfg(not(target_os = "windows"))]
-    {
-        std::process::Command::new(executable)
-            .args(args)
-            .spawn()
-            .is_ok()
-    }
+    cmd.spawn().is_ok()
 }
 
 /// Spawns a process and streams its output back to JS via events.

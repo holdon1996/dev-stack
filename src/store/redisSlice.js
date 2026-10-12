@@ -31,10 +31,15 @@ export const createRedisSlice = (set, get) => ({
         try {
             const { invoke } = await import('@tauri-apps/api/core');
             const port = String(get().settings.portRedis || 6379);
-            await invoke('start_detached_process', {
+            // Run inside the Redis folder with a relative conf name (like its start.bat):
+            // msys2/cygwin builds (Redis 7+) cannot open a Windows path such as F:\...\redis.conf.
+            const conf = redis.conf?.split('\\').pop();
+            const ok = await invoke('start_detached_process', {
                 executable: redis.exe,
-                args: [...(redis.conf ? [redis.conf] : []), '--port', port],
+                args: [...(conf ? [conf] : []), '--port', port],
+                cwd: redis.dir,
             });
+            if (!ok) throw new Error(redis.exe);
             return true;
         } catch (e) {
             console.error('Failed to start Redis natively', e);
