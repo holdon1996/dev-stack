@@ -972,17 +972,35 @@ fn stop_devstack_processes(app: &tauri::AppHandle) {
     }
 }
 
+/// Set once quitting starts: the tray must not bring the window back while services stop.
+static QUITTING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 /// Hides the window at once and stops DevStack's processes in the background before
 /// exiting, so closing never looks frozen while services shut down.
 fn quit_in_background(app: &tauri::AppHandle) {
+    if QUITTING.swap(true, Ordering::SeqCst) {
+        return;
+    }
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.hide();
     }
     let app = app.clone();
     std::thread::spawn(move || {
-        stop_devstack_processes(&app);
+        // Exit even if stopping fails (e.g. a poisoned lock): never leave a hidden app behind.
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| stop_devstack_processes(&app)));
         app.exit(0);
     });
+}
+
+/// Shows the main window, unless the app is already quitting.
+fn show_main_window(app: &tauri::AppHandle) {
+    if QUITTING.load(Ordering::SeqCst) {
+        return;
+    }
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
 }
 
 /// PID of the process listening on `port` (IPv4), if any.
@@ -3479,11 +3497,7 @@ pub fn run() {
                 .show_menu_on_left_click(false)
                 .on_menu_event(|app, event| match event.id.as_ref() {
                     "quit" => quit_in_background(app),
-                    "show" => {
-                        let window = app.get_webview_window("main").unwrap();
-                        window.show().unwrap();
-                        window.set_focus().unwrap();
-                    }
+                    "show" => show_main_window(app),
                     _ => {}
                 })
                 .on_tray_icon_event(|tray, event| {
@@ -3493,19 +3507,14 @@ pub fn run() {
                         ..
                     } = event
                     {
-                        let app = tray.app_handle();
-                        if let Some(window) = app.get_webview_window("main") {
-                            let _ = window.show();
-                            let _ = window.set_focus();
-                        }
+                        show_main_window(tray.app_handle());
                     }
                 })
                 .build(app)?;
 
             Ok(())
         })
-        // Window close event: let JS handler (killAllChildProcesses) do its thing,
-        // then the window closes naturally. No prevent_close needed.
+        // Closing the main window is handled in on_window_event: hide, stop services, exit.
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

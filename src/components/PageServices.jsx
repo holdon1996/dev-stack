@@ -107,7 +107,7 @@ const ServiceRow = ({ service }) => {
 
           {isEditingPort && (
             <input
-              className="absolute inset-0 w-20 mx-auto bg-bg border-2 border-accent rounded-lg text-[12px] font-mono px-2 py-0.5 outline-none text-center text-accent shadow-[0_0_15px_rgba(34,211,238,0.3)] z-10"
+              className="absolute inset-y-0 left-0 w-20 bg-bg border-2 border-accent rounded-lg text-[12px] font-mono px-2 py-0.5 outline-none text-center text-accent shadow-[0_0_15px_rgba(34,211,238,0.3)] z-10"
               value={tempPort}
               onChange={(e) => setTempPort(e.target.value)}
               onBlur={() => { updateServicePort(service.id, tempPort); setIsEditingPort(false); }}
