@@ -68,7 +68,10 @@ export const createServiceSlice = (set, get) => ({
         set({ currentLog: id });
         get().streamServiceLogs?.(id);
     },
-    clearLog: () => set(s => ({ logs: { ...s.logs, [s.currentLog]: [] } })),
+    clearLog: () => set(s => ({
+        logs: { ...s.logs, [s.currentLog]: [] },
+        ...(s.currentLog === 'storage' ? { procLogs: { ...s.procLogs, minio: [] } } : {}),
+    })),
 
     startMailpit: async () => {
         const settings = get().settings;
@@ -353,7 +356,11 @@ export const createServiceSlice = (set, get) => ({
      * error is reported, and the row never stays spinning. Returns false when busy.
      */
     _withService: async (id, fn) => {
-        if (busyServices.has(id)) return false;
+        if (busyServices.has(id)) {
+            const name = get().services.find(s => s.id === id)?.name || '';
+            get().showToast(get().t('serviceBusy', { name }), 'info');
+            return false;
+        }
         busyServices.add(id);
         try {
             return await fn();
@@ -482,7 +489,8 @@ export const createServiceSlice = (set, get) => ({
                 return false;
             }
 
-            const success = await get()._pollUntilStable(id, 'running');
+            // MySQL can need much longer before it listens (crash recovery, slow disk, antivirus).
+            const success = await get()._pollUntilStable(id, 'running', svc.type === 'db' ? 22 : 12);
             console.log(`[Timer] Total Start Time: ${(performance.now() - t0).toFixed(2)}ms`);
 
             if (success) {
@@ -495,7 +503,7 @@ export const createServiceSlice = (set, get) => ({
                 const message = alive
                     ? get().t('serviceNotAnswering', { name: svcLabel, port: svc.port })
                     : get().t('serviceExited', { name: svcLabel });
-                get().showToast(message, 'danger', { action: { label: get().t('logs'), page: 'logs' } });
+                get().showToast(message, 'danger', { action: { label: get().t('logs'), page: 'logs', log: logType } });
                 get().addServiceLog(logType, message, 'err');
             }
             return success;
@@ -510,7 +518,7 @@ export const createServiceSlice = (set, get) => ({
         let seen = false;
         for (let i = 0; i < maxAttempts; i++) {
             // Give the OS a tiny fraction of time to spin up the process tree
-            const delay = delays[i] || 1000;
+            const delay = delays[i] || 2000;
             await new Promise(r => setTimeout(r, delay));
 
             await get().checkServicesRunning();
@@ -520,8 +528,10 @@ export const createServiceSlice = (set, get) => ({
                 if (svc.status === targetStatus) return true;
                 continue;
             }
-            // A live process is not enough: it must also answer on its port.
-            if (svc.status === 'running' && (svc.listening || !(parseInt(svc.port) > 0))) return true;
+            // A live process is not enough: Apache, MySQL and Redis must also answer on their
+            // port (always 127.0.0.1). Mailpit may listen on a LAN address the check cannot reach.
+            const portChecked = ['web', 'db', 'cache'].includes(svc.type) && parseInt(svc.port) > 0;
+            if (svc.status === 'running' && (svc.listening || !portChecked)) return true;
             seen ||= !!svc.pid;
             // Gone again, or never appeared: it crashed on startup, so stop waiting.
             if ((seen && !svc.pid) || (!seen && i >= 3)) break;

@@ -56,9 +56,8 @@ export const createProcessSlice = (set, get) => ({
     devstackPathPrefix: (phpVersion) => {
         const st = get();
         const devDir = getDevDir(st);
-        const php = phpVersion
-            ? st.phpVersions.find(v => v.version === phpVersion && v.installed)
-            : st.phpVersions.find(v => v.active && v.installed);
+        // Same PHP the site's FastCGI pool runs on (including the same-minor fallback).
+        const php = st._sitePhp({ phpVersion });
         const mysql = st.mysqlVersions.find(v => v.active && v.installed);
         return [
             php && getPhpDir(st, php),

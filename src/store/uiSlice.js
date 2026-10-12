@@ -40,9 +40,10 @@ export const createUiSlice = (set, get) => ({
 
     /** `action`: optional `{ label, page }` or `{ label, guide: '<anchor>' }` button (e.g. "How to fix"). */
     showToast: (msg, type = 'ok', { action } = {}) => {
-        // An error stays readable: a following progress or success message must not replace it.
+        // An error stays readable: a following progress message must not replace it. A result
+        // (ok / warn) does, so a successful retry is not hidden behind the old error.
         const current = get().toast;
-        if (current.show && current.type === 'danger' && type !== 'danger') return;
+        if (current.show && current.type === 'danger' && type === 'info') return;
         // A newer toast must not be hidden by the previous toast's timer.
         clearTimeout(toastTimer);
         set({ toast: { show: true, msg, type, action } });

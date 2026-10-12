@@ -21,7 +21,11 @@ const Toast = () => {
   const current = icons[toast.type] || icons.info;
   const Icon = current.icon;
   const { action } = toast;
-  const runAction = () => (action.guide !== undefined ? openGuide(action.guide) : setActivePage(action.page));
+  const runAction = () => {
+    if (action.guide !== undefined) return openGuide(action.guide);
+    if (action.log) useStore.getState().switchLog(action.log);
+    setActivePage(action.page);
+  };
 
   return (
     <div

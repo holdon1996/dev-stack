@@ -21,6 +21,8 @@ export const createSiteSlice = (set, get) => ({
     siteApplying: false,
     /** The www folder could not be read: `sites` is the last known list, hosts sync is paused. */
     sitesUnavailable: false,
+    /** The last applySites wrote the vhosts but not the hosts file (its error toast is showing). */
+    hostsSyncFailed: false,
     apacheConfigStale: false,
 
     _patchSiteConfig: (key, patch) => set(s => ({
@@ -190,7 +192,7 @@ export const createSiteSlice = (set, get) => ({
                 aliases: aliases.filter(a => a !== domain),
                 ssl: current?.managed ? base.ssl : base.ssl || !domain.endsWith('.test'),
             });
-            if (ok) get().showToast(get().t('siteApplied', { domain }), 'ok');
+            if (ok && !get().hostsSyncFailed) get().showToast(get().t('siteApplied', { domain }), 'ok');
             return ok;
         } catch (e) {
             get().showToast(`${e}`, 'danger');
@@ -303,7 +305,7 @@ export const createSiteSlice = (set, get) => ({
     enableSite: async (site) => {
         const cfg = get().siteConfigs[site.key]?.managed ? get().siteConfigs[site.key] : await get().detectSiteConfig(site);
         const ok = await get().saveSiteConfig(site.key, cfg);
-        if (ok) get().showToast(get().t('siteApplied', { domain: cfg.domain }), 'ok');
+        if (ok && !get().hostsSyncFailed) get().showToast(get().t('siteApplied', { domain: cfg.domain }), 'ok');
         if (ok && cfg.type === 'proxy') await get()._warnViteAllowedHosts(site, cfg);
         return ok;
     },
@@ -484,7 +486,8 @@ export const createSiteSlice = (set, get) => ({
                 if (gone.length) showToast(t('legacyHostsRemovedWarn', { hosts: gone.join(', ') }), 'warn');
             }
 
-            await get().syncHosts({ legacy: legacyHosts });
+            // The vhosts are applied either way; a failed hosts write keeps its error visible.
+            set({ hostsSyncFailed: !(await get().syncHosts({ legacy: legacyHosts })) });
             await get().ensureFcgiBackends();
             await get()._remindOldFcgiSetup(report);
 

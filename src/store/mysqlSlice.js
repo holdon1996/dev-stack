@@ -76,7 +76,9 @@ export const createMysqlSlice = (set, get) => ({
                 const old = s.mysqlVersions.find(e => e.version === v.version);
                 return old ? { ...old, downloadUrl: v.url } : { version: v.version, installed: false, active: false, installing: false, downloadUrl: v.url };
             });
-            return { mysqlVersions: newList };
+            // Custom versions (installed from a link) stay, with their installed/active flags.
+            const custom = s.mysqlVersions.filter(e => !versions.some(v => v.version === e.version) && (e.installed || e.installing));
+            return { mysqlVersions: [...newList, ...custom] };
         });
     },
 

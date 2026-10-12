@@ -189,8 +189,7 @@ export const createApacheSlice = (set, get) => ({
         // Starting while the old instance still holds :80 only fails with "could not bind".
         if ((web?.status === 'running' || web?.pid) && !(await get()._toggleService(1, 'stop'))) return false;
         await new Promise(r => setTimeout(r, 1000));
-        await get()._toggleService(1, 'start');
-        return true;
+        return get()._toggleService(1, 'start');
     }),
 
     installApacheVersion: async (version) => {
