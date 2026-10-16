@@ -43,6 +43,8 @@ export const fetchLatestMailpitRelease = async () => {
 
 const fetchMailpitRelease = async () => {
   const res = await fetch(MAILPIT_REPO_API, { headers: { Accept: 'application/vnd.github+json' } });
+  // e.g. 403 when GitHub's anonymous rate limit is hit: fail, so the fallback is not cached.
+  if (!res.ok) throw new Error(`GitHub API ${res.status}`);
   const data = await res.json();
   const asset = data.assets?.find((item) => item.name === 'mailpit-windows-amd64.zip');
 

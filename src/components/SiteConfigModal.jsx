@@ -60,7 +60,7 @@ export const SiteProcessList = ({ site, cfg }) => {
               <span className="text-[12px] font-bold">{proc.name}</span>
               <code className="text-[11px] text-muted font-mono truncate flex-1" title={proc.command}>{proc.command}</code>
               {/* Exited on its own (crash, or gave up after repeated crashes): show why it is not running. */}
-              {!running && procs[id]?.code != null && (
+              {!running && procs[id]?.code != null && !procs[id]?.stopped && (
                 <span className="text-[11px] text-warn font-mono shrink-0">{t('processExited', { code: procs[id].code })}</span>
               )}
               <button type="button" className="btn-ghost p-1.5" title={t('showLog')} onClick={() => setOpenLog(openLog === id ? null : id)}>

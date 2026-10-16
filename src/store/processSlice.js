@@ -48,7 +48,10 @@ export const createProcessSlice = (set, get) => ({
                 // A late "exited" from an earlier run of a restarted id (runs only grow) is stale.
                 if (s.procs[payload.id]?.run > payload.run) return {};
                 return {
-                    procs: { ...s.procs, [payload.id]: { running: payload.running, pid: payload.pid, command: payload.command, code: payload.code, run: payload.run } },
+                    procs: { ...s.procs, [payload.id]: {
+                        running: payload.running, pid: payload.pid, command: payload.command, code: payload.code, run: payload.run,
+                        stopped: !payload.running && !!s.procs[payload.id]?.stopped && s.procs[payload.id]?.run === payload.run,
+                    } },
                 };
             })),
         ];
@@ -108,7 +111,7 @@ export const createProcessSlice = (set, get) => ({
         try {
             set(s => ({ procLogs: { ...s.procLogs, [id]: [{ t: new Date().toLocaleTimeString(), m: `$ ${command}`, l: 'info' }] } }));
             const run = await invoke('proc_start', { id, command, cwd: win(cwd), pathPrefix, env, restart });
-            set(s => ({ procs: { ...s.procs, [id]: { ...s.procs[id], running: true, command, run: Math.max(run, s.procs[id]?.run || 0) } } }));
+            set(s => ({ procs: { ...s.procs, [id]: { ...s.procs[id], running: true, stopped: false, command, run: Math.max(run, s.procs[id]?.run || 0) } } }));
             return true;
         } catch (e) {
             showToast(`${e}`, 'danger');
@@ -119,7 +122,8 @@ export const createProcessSlice = (set, get) => ({
     stopProcess: async (id) => {
         const { invoke } = await import('@tauri-apps/api/core');
         await invoke('proc_stop', { id });
-        set(s => ({ procs: { ...s.procs, [id]: { ...s.procs[id], running: false } } }));
+        // `stopped`: the user stopped it, so its exit code is not shown as a crash.
+        set(s => ({ procs: { ...s.procs, [id]: { ...s.procs[id], running: false, stopped: true } } }));
     },
 
     siteProcessId: (site, proc) => `${site.key}:${proc.name}`,

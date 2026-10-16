@@ -69,7 +69,10 @@ export const createApacheSlice = (set, get) => ({
             const { invoke } = await import('@tauri-apps/api/core');
             // Dynamically fetched from apachelounge.com via Rust reqwest — no PS, no hardcode
             const fetched = await invoke('fetch_apache_versions');
-            if (!fetched?.length) return;
+            if (!fetched?.length) {
+                forgetFetch('apache-versions'); // offline or the page changed: try again next visit
+                return;
+            }
 
             set(s => {
                 const newList = fetched.map(f => {

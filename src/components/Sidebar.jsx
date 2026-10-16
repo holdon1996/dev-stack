@@ -4,6 +4,18 @@ import { useShallow } from 'zustand/react/shallow';
 import packageJson from '../../package.json';
 import { Layout, Globe, Database, Code, FileText, Settings, Radio, FileCode, Server, Boxes, Mail, Globe2, LifeBuoy } from 'lucide-react';
 
+/** One nav entry. Defined outside Sidebar: a component created inside it would be remounted on
+ * every Sidebar render (stats update every few seconds), dropping keyboard focus and clicks. */
+const NavItem = ({ item, active, onSelect }) => {
+  const Icon = item.icon;
+  return (
+    <button type="button" onClick={() => onSelect(item.id)} aria-current={active ? 'page' : undefined} className={`nav-item w-full text-left ${active ? 'active' : ''}`}>
+      <Icon size={16} />
+      {item.label}
+    </button>
+  );
+};
+
 const Sidebar = () => {
   // `locale` is selected so labels re-render when the language changes (`t` itself is stable).
   const { activePage, setActivePage, systemStats, t } = useStore(useShallow(s => ({
@@ -29,16 +41,6 @@ const Sidebar = () => {
     { id: 'guide', label: t('guide'), icon: LifeBuoy },
     { id: 'settings', label: t('settings'), icon: Settings },
   ];
-  const NavItem = ({ item }) => {
-    const Icon = item.icon;
-    const active = activePage === item.id;
-    return (
-      <button type="button" onClick={() => setActivePage(item.id)} aria-current={active ? 'page' : undefined} className={`nav-item w-full text-left ${active ? 'active' : ''}`}>
-        <Icon size={16} />
-        {item.label}
-      </button>
-    );
-  };
 
   // Redundant polling removed. Handled by global hooks in App.jsx.
 
@@ -55,11 +57,11 @@ const Sidebar = () => {
       </div>
 
       <nav className="flex flex-col gap-0.5 flex-1 min-h-0 overflow-y-auto overflow-x-hidden pr-1">
-        {navItems.map(item => <NavItem key={item.id} item={item} />)}
+        {navItems.map(item => <NavItem key={item.id} item={item} active={activePage === item.id} onSelect={setActivePage} />)}
 
         <div className="border-t border-[#1a1c22] my-2.5"></div>
 
-        {bottomItems.map(item => <NavItem key={item.id} item={item} />)}
+        {bottomItems.map(item => <NavItem key={item.id} item={item} active={activePage === item.id} onSelect={setActivePage} />)}
       </nav>
 
       {/* System Status Bar */}

@@ -69,6 +69,20 @@ export const createGuideSlice = (set, get) => ({
      */
     installRecommendedStack: async () => {
         const { t, showToast } = get();
+        // One run at a time (a second one would download into the same folders).
+        if (get().stackInstalling) return false;
+        set({ stackInstalling: true });
+        try {
+            return await get()._installRecommendedStack();
+        } finally {
+            set({ stackInstalling: false });
+        }
+    },
+
+    stackInstalling: false,
+
+    _installRecommendedStack: async () => {
+        const { t, showToast } = get();
         const newest = (list) => [...list].filter(v => v.downloadUrl)
             .sort((a, b) => b.version.localeCompare(a.version, undefined, { numeric: true }))[0]?.version;
         // PHP 8.4: current and widely supported by Laravel / Symfony; else the newest 8.x.
@@ -96,12 +110,24 @@ export const createGuideSlice = (set, get) => ({
                 return false;
             }
         }
+        // Installed but never activated (e.g. folders copied from another machine): activate
+        // the newest, otherwise the checklist stays red although nothing is missing.
+        const newestInstalled = (list) => [...list].filter(v => v.installed)
+            .sort((a, b) => b.version.localeCompare(a.version, undefined, { numeric: true }))[0]?.version;
+        for (const [list, activate] of [
+            [() => get().apacheVersions, (v) => get().setActiveApache(v)],
+            [() => get().phpVersions, (v) => get().setActivePhp(v)],
+            [() => get().mysqlVersions, (v) => get().setActiveMysql(v)],
+        ]) {
+            if (!list().some(v => v.active && v.installed) && newestInstalled(list())) await activate(newestInstalled(list()));
+        }
+        let allRunning = true;
         for (const type of ['web', 'db']) {
             const svc = get().services.find(s => s.type === type);
-            if (svc && svc.status !== 'running') await get().toggleService(svc.id);
+            if (svc && svc.status !== 'running' && !(await get().toggleService(svc.id))) allRunning = false;
         }
-        showToast(t('stackReady'), 'ok', { key: 'stack' });
-        return true;
+        if (allRunning) showToast(t('stackReady'), 'ok', { key: 'stack' });
+        return allRunning;
     },
 
     /** Runs the "Fix" button of a checklist row, then re-checks. */

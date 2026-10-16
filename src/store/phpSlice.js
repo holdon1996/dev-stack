@@ -124,6 +124,7 @@ export const createPhpSlice = (set, get) => ({
             console.log('[Store] Fetched PHP versions from remote:', fetched);
             if (!fetched?.length) {
                 console.warn('[Store] fetchPhpVersions returned empty list. Using fallback URLs.');
+                forgetFetch('php-versions'); // offline or the page changed: try again next visit
                 return;
             }
 
