@@ -214,7 +214,7 @@ const ServiceRow = ({ service }) => {
 };
 
 const MinioPanel = () => {
-  const { services, minioBuckets, listMinioBuckets, createMinioBucket, installMinio, minioCredentials, minioPaths, t } = useStore();
+  const { services, minioBuckets, listMinioBuckets, createMinioBucket, installMinio, minioInstalling, minioCredentials, minioPaths, t } = useStore();
   const [bucket, setBucket] = useState('');
   const [installed, setInstalled] = useState(true);
   const svc = services.find(s => s.type === 'storage');
@@ -235,8 +235,8 @@ const MinioPanel = () => {
         <HardDrive size={15} className="text-accent" />
         <span className="text-[13px] font-bold flex-1">MinIO (S3)</span>
         {!installed && (
-          <button type="button" className="btn-primary text-[11px] py-1 px-2.5 flex items-center gap-1" onClick={async () => setInstalled(await installMinio())}>
-            <Download size={12} /> {t('install')}
+          <button type="button" className="btn-primary text-[11px] py-1 px-2.5 flex items-center gap-1" disabled={minioInstalling} aria-busy={minioInstalling} onClick={async () => { if (await installMinio()) setInstalled(true); }}>
+            {minioInstalling ? <Loader size={12} className="animate-spin" /> : <Download size={12} />} {minioInstalling ? t('installing') : t('install')}
           </button>
         )}
         <button type="button" className="btn-ghost text-[11px] py-1 px-2 flex items-center gap-1" onClick={() => openUrl(`http://127.0.0.1:${port + 1}`)} disabled={svc?.status !== 'running'}>

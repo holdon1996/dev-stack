@@ -128,13 +128,17 @@ export const createMysqlSlice = (set, get) => ({
             });
 
             if (result !== "SUCCESS") throw result;
-            set(s => ({ mysqlVersions: s.mysqlVersions.map(mv => mv.version === version ? { ...mv, installed: true, installing: false } : mv) }));
+            set(s => ({
+                mysqlVersions: s.mysqlVersions.map(mv => mv.version === version ? { ...mv, installed: true, installing: false, progress: 100 } : mv),
+                mysqlInstallProgress: { ...s.mysqlInstallProgress, pct: 100 },
+            }));
             get().showToast(get().t('versionInstalled', { name: `MySQL ${version}` }), 'ok');
             if (!get().mysqlVersions.some(mv => mv.active && mv.installed)) await get().setActiveMysql(version);
         } catch (e) {
             console.error('installMysqlVersion error:', e);
             set(s => ({
-                mysqlVersions: s.mysqlVersions.map(mv => mv.version === version ? { ...mv, installing: false } : mv),
+                mysqlVersions: s.mysqlVersions.map(mv => mv.version === version ? { ...mv, installing: false, progress: 0 } : mv),
+                mysqlInstallProgress: { pct: 0, downloaded: 0, total: 0 },
                 mysqlInstallLogs: [...s.mysqlInstallLogs, { t: new Date().toLocaleTimeString(), m: get().t('installLogError', { error: `${e}` }), l: 'err' }]
             }));
             get().showToast(get().t('installFailedToast'), 'danger');

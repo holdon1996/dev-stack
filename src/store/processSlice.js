@@ -13,6 +13,8 @@ let procListeners = null;
  */
 export const createProcessSlice = (set, get) => ({
     procs: {},
+    /** MinIO download in progress: a second click must not start another ~100 MB download. */
+    minioInstalling: false,
     procLogs: {},
     groupEnvs: {},
     minioBuckets: [],
@@ -221,6 +223,8 @@ export const createProcessSlice = (set, get) => ({
     },
 
     installMinio: async () => {
+        if (get().minioInstalling) return false;
+        set({ minioInstalling: true });
         const { invoke } = await import('@tauri-apps/api/core');
         const { exe, mc } = get().minioPaths();
         get().showToast(get().t('minioDownloading'), 'info');
@@ -232,6 +236,8 @@ export const createProcessSlice = (set, get) => ({
         } catch (e) {
             get().showToast(`${e}`, 'danger');
             return false;
+        } finally {
+            set({ minioInstalling: false });
         }
     },
 

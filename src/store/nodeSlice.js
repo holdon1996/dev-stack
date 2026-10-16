@@ -133,6 +133,7 @@ export const createNodeSlice = (set, get) => ({
                 nodeVersions: hadExisting
                     ? s.nodeVersions.map(v => v.version === version ? { ...v, installing: false } : v)
                     : s.nodeVersions.filter(v => v.version !== version),
+                nodeInstallProgress: { pct: 0, downloaded: 0, total: 0 },
                 nodeInstallLogs: [...s.nodeInstallLogs, { t: new Date().toLocaleTimeString(), m: get().t('installLogError', { error: `${e}` }), l: 'err' }]
             }));
             get().showToast(get().t('nodeInstallFailed', { error: `${e}` }), 'danger');

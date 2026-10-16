@@ -12,7 +12,6 @@ const PageSettings = () => {
     setLocale,
     browseForFolder,
     browseForEditor,
-    initApp,
     t,
     appUpdate,
     checkAppUpdate,
@@ -100,15 +99,14 @@ const PageSettings = () => {
     showToast(t('settingsSaved'), 'ok');
   };
 
-  const handleRescan = () => {
-    // Sync local state to store before init
+  // Only rescans installs and projects: initApp would auto-start services and toast "ready" again.
+  const handleRescan = async () => {
     updateSetting('rootPath', localRootPath);
     updateSetting('devStackDir', localDevDir);
-
-    setTimeout(() => {
-      initApp();
-      showToast('Rescanning...', 'info');
-    }, 100);
+    showToast(t('rescanning'), 'info');
+    const s = useStore.getState();
+    await Promise.all([s.scanInstalledApache(), s.scanInstalledPhp(), s.scanInstalledMysql(), s.scanInstalledNode(), s.resolveRedis(), s.scanSites()]);
+    showToast(t('installsRescanned'), 'ok');
   };
 
   const handleOpenInspector = async () => {

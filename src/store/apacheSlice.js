@@ -266,14 +266,18 @@ export const createApacheSlice = (set, get) => ({
             });
 
             if (result !== "SUCCESS") throw result;
-            set(s => ({ apacheVersions: s.apacheVersions.map(av => av.version === version ? { ...av, installed: true, installing: false } : av) }));
+            set(s => ({
+                apacheVersions: s.apacheVersions.map(av => av.version === version ? { ...av, installed: true, installing: false, progress: 100 } : av),
+                apacheInstallProgress: { ...s.apacheInstallProgress, pct: 100 },
+            }));
             get().showToast(get().t('versionInstalled', { name: `Apache ${version}` }), 'ok');
             // First install: activate it so Start works right away.
             if (!get().apacheVersions.some(av => av.active && av.installed)) await get().setActiveApache(version);
         } catch (e) {
             console.error('installApacheVersion error:', e);
             set(s => ({
-                apacheVersions: s.apacheVersions.map(av => av.version === version ? { ...av, installing: false } : av),
+                apacheVersions: s.apacheVersions.map(av => av.version === version ? { ...av, installing: false, progress: 0 } : av),
+                apacheInstallProgress: { pct: 0, downloaded: 0, total: 0 },
                 apacheInstallLogs: [...s.apacheInstallLogs, { t: new Date().toLocaleTimeString(), m: get().t('installLogError', { error: `${e}` }), l: 'err' }]
             }));
             get().showToast(get().t('installFailedToast'), 'danger');

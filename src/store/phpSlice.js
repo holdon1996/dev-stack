@@ -238,7 +238,10 @@ export const createPhpSlice = (set, get) => ({
             });
 
             if (result !== "SUCCESS") throw result;
-            set(s => ({ phpVersions: s.phpVersions.map(pv => pv.version === version ? { ...pv, installed: true, installing: false } : pv) }));
+            set(s => ({
+                phpVersions: s.phpVersions.map(pv => pv.version === version ? { ...pv, installed: true, installing: false, progress: 100 } : pv),
+                phpInstallProgress: { ...s.phpInstallProgress, pct: 100 },
+            }));
             get().showToast(get().t('versionInstalled', { name: `PHP ${version}` }), 'ok');
             // Without the CA block, curl in the new PHP fails (error 60) until the next app start.
             await get().ensurePhpCaConfig();
@@ -246,7 +249,8 @@ export const createPhpSlice = (set, get) => ({
         } catch (e) {
             console.error('installPhpVersion error:', e);
             set(s => ({
-                phpVersions: s.phpVersions.map(pv => pv.version === version ? { ...pv, installing: false } : pv),
+                phpVersions: s.phpVersions.map(pv => pv.version === version ? { ...pv, installing: false, progress: 0 } : pv),
+                phpInstallProgress: { pct: 0, downloaded: 0, total: 0 },
                 phpInstallLogs: [...s.phpInstallLogs, { t: new Date().toLocaleTimeString(), m: get().t('installLogError', { error: `${e}` }), l: 'err' }]
             }));
             get().showToast(get().t('installFailedToast'), 'danger');
@@ -307,17 +311,24 @@ export const createPhpSlice = (set, get) => ({
 
             if (result === "SUCCESS") {
                 set(s => ({
-                    phpVersions: s.phpVersions.map(pv => pv.version === version ? { ...pv, installed: true, installing: false, progress: 100 } : pv)
+                    phpVersions: s.phpVersions.map(pv => pv.version === version ? { ...pv, installed: true, installing: false, progress: 100 } : pv),
+                    phpInstallProgress: { ...s.phpInstallProgress, pct: 100 },
                 }));
                 await get().scanInstalledPhp();
                 get().showToast(get().t('versionInstalled', { name: `PHP ${version}` }), 'ok');
                 await get().ensurePhpCaConfig();
             } else {
-                set(s => ({ phpVersions: s.phpVersions.map(pv => pv.version === version ? { ...pv, installing: false } : pv) }));
+                set(s => ({
+                    phpVersions: s.phpVersions.map(pv => pv.version === version ? { ...pv, installing: false, progress: 0 } : pv),
+                    phpInstallProgress: { pct: 0, downloaded: 0, total: 0 },
+                }));
             }
         } catch (e) {
             console.error('installCustomPhp error:', e);
-            set(s => ({ phpVersions: s.phpVersions.map(pv => pv.version === version ? { ...pv, installing: false } : pv) }));
+            set(s => ({
+                phpVersions: s.phpVersions.map(pv => pv.version === version ? { ...pv, installing: false, progress: 0 } : pv),
+                phpInstallProgress: { pct: 0, downloaded: 0, total: 0 },
+            }));
             get().showToast(get().t('customInstallFailed', { error: `${e}` }), 'danger');
         } finally {
             unlistenLogs?.();

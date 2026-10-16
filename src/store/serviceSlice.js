@@ -227,12 +227,17 @@ export const createServiceSlice = (set, get) => ({
                     apacheVersions,
                     services: s.services.map((svc, i) => {
                         if (svc.type === 'php') {
+                            // PHP runs inside Apache (mod_php) or as the FastCGI pools of the sites.
+                            const hasFcgiSite = get()._sitesWithFcgi().some(site => site.fcgi);
+                            const hasActivePhp = s.phpVersions.some(v => v.active && v.installed);
+                            const fcgiUp = !hasFcgiSite || Object.entries(s.procs || {}).some(([id, p]) => id.startsWith('fcgi:') && p.running);
+                            const phpRunning = isApacheRunning && hasActivePhp && fcgiUp;
                             return {
                                 ...svc,
-                                status: isApacheRunning ? 'running' : 'stopped',
-                                pid: isApacheRunning ? 'Apache' : null,
+                                status: phpRunning ? 'running' : 'stopped',
+                                pid: phpRunning ? 'Apache' : null,
                                 memory: '—',
-                                path: get()._sitesWithFcgi().some(s => s.fcgi) ? get().t('phpRunsFcgi') : get().t('phpRunsModule'),
+                                path: hasFcgiSite ? get().t('phpRunsFcgi') : get().t('phpRunsModule'),
                                 portConflict: conflicts[i]
                             };
                         }
@@ -445,9 +450,11 @@ export const createServiceSlice = (set, get) => ({
         if (svc.type === 'web') activeVer = get().apacheVersions.find(v => v.active && v.installed)?.version || activeVer || '...';
         if (svc.type === 'db') activeVer = get().mysqlVersions.find(v => v.active && v.installed)?.version || activeVer || '...';
         if (svc.type === 'php') activeVer = get().phpVersions.find(v => v.active && v.installed)?.version || activeVer || '...';
-        if (svc.type === 'cache' || svc.type === 'storage') activeVer = 'Latest';
-        if (svc.type === 'mail') activeVer = get().settings.mailpitVersion || activeVer || 'Mailpit';
-        const svcLabel = `${svc.name.replace(' (DevStack)', '')} v${activeVer} (Port: ${svc.port})`;
+        if (svc.type === 'mail') activeVer = get().settings.mailpitVersion || activeVer;
+        // Unknown versions ('Latest', '-', '...') are left out instead of showing "vLatest".
+        const ver = `${activeVer || ''}`.replace(/^v/i, '');
+        const verLabel = /^\d/.test(ver) ? ` v${ver}` : '';
+        const svcLabel = `${svc.name.replace(' (DevStack)', '')}${verLabel} (Port: ${svc.port})`;
 
         const isRunning = svc.status === 'running' || svc.pid;
         const shouldStop = action ? action === 'stop' : isRunning;
