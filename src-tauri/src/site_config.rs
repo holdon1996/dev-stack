@@ -803,8 +803,12 @@ fn export_root_certs() -> String {
             let mut ctx = CertEnumCertificatesInStore(store, std::ptr::null());
             while !ctx.is_null() {
                 let cert = &*ctx;
-                let der = std::slice::from_raw_parts(cert.pbCertEncoded, cert.cbCertEncoded as usize);
-                if seen.insert(der.to_vec()) {
+                let der: &[u8] = if cert.pbCertEncoded.is_null() {
+                    &[]
+                } else {
+                    std::slice::from_raw_parts(cert.pbCertEncoded, cert.cbCertEncoded as usize)
+                };
+                if !der.is_empty() && seen.insert(der.to_vec()) {
                     let mut subject = [0u16; 1024];
                     let len = CertNameToStrW(
                         X509_ASN_ENCODING,

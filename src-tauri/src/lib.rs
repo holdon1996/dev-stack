@@ -1618,7 +1618,8 @@ fn find_project_manifests(root: String) -> Vec<String> {
         let Ok(entries) = fs::read_dir(dir) else { return Vec::new() };
         entries
             .flatten()
-            .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()))
+            // path().is_dir() follows junctions (`mklink /J www\api D:\repos\api`), as before.
+            .filter(|e| e.path().is_dir())
             .filter_map(|e| e.file_name().to_str().map(String::from))
             .collect()
     };
