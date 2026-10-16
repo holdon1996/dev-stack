@@ -83,7 +83,8 @@ export const createApacheSlice = (set, get) => ({
         }
     },
 
-    startApache: async () => {
+    /** `configVerified`: `httpd -t` already passed on this config (see restartApache). */
+    startApache: async ({ configVerified = false } = {}) => {
         let active = get().apacheVersions.find(v => v.active && v.installed);
         if (!active) {
             // Installed but never activated: the most common first-day blocker.
@@ -120,6 +121,9 @@ export const createApacheSlice = (set, get) => ({
 
             const rootPath = get().settings.rootPath.replace(/\\/g, '/').replace(/\/+$/, '');
             await invoke('create_dir', { path: rootPath.replace(/\//g, '\\') });
+            // httpd -t can be skipped (configVerified) only if the path patch changes nothing.
+            const confPath = `${resolvedRoot}/conf/httpd.conf`.replace(/\//g, '\\');
+            const confBefore = configVerified ? await invoke('read_text_file', { path: confPath }).catch(() => null) : null;
             await invoke('patch_apache_paths', {
                 newServerRoot: resolvedRoot,
                 newDocRoot: rootPath,
@@ -133,7 +137,9 @@ export const createApacheSlice = (set, get) => ({
             if (get()._managedSites().some(s => usesFcgi(s.cfg) && !Number.isInteger(s.cfg.fcgiPortBase))) {
                 await get().applySites({ restart: false });
             }
-            if (!(await get()._apacheConfigOk(resolvedRoot))) return false;
+            const confUnchanged = confBefore !== null
+                && confBefore === await invoke('read_text_file', { path: confPath }).catch(() => undefined);
+            if (!confUnchanged && !(await get()._apacheConfigOk(resolvedRoot))) return false;
             if (get()._managedSites().some(s => s.cfg.ssl)) {
                 const owner = await invoke('port_owner', { port: 443 });
                 if (owner && !/^httpd/i.test(owner.name)) {
@@ -189,12 +195,17 @@ export const createApacheSlice = (set, get) => ({
     restartApache: ({ configVerified = false } = {}) => get()._withService(1, async () => {
         const web = get().services.find(s => s.type === 'web');
         const apacheRoot = get()._activeApacheRoot();
-        // Keep the running instance when the new config would not start.
-        if (!configVerified && web?.status === 'running' && apacheRoot && !(await get()._apacheConfigOk(apacheRoot))) return false;
+        // Keep the running instance when the new config would not start. Checked once: the
+        // start below skips its own `httpd -t` (~0.45 s) when nothing changed in between.
+        let verified = configVerified;
+        if (!verified && web?.status === 'running' && apacheRoot) {
+            if (!(await get()._apacheConfigOk(apacheRoot))) return false;
+            verified = true;
+        }
         // Starting while the old instance still holds :80 only fails with "could not bind".
         if ((web?.status === 'running' || web?.pid) && !(await get()._toggleService(1, 'stop'))) return false;
         await get()._waitPortsFree();
-        return get()._toggleService(1, 'start');
+        return get()._toggleService(1, 'start', { configVerified: verified });
     }),
 
     /** Waits (up to ~1.5 s) until Apache's ports are released, instead of a fixed pause. */

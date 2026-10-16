@@ -344,8 +344,18 @@ export const createConfigSlice = (set, get) => ({
             }
 
             await invoke('write_text_file', { path: `${projectPath}\\index.php`, content: `<?php\n\nphpinfo();\n` });
-            showToast(t('projectCreated', { name }), 'ok');
             await get().scanSites();
+            // Link it right away (vhost + hosts + PHP pool): a new project should open in the
+            // browser, not show a `.test` link that fails with a DNS error.
+            const site = get().sites.find(s => s.key === name);
+            if (site && get()._activeApacheRoot() && await get().enableSite(site)) {
+                const cfg = get().siteConfigs[name];
+                showToast(t('projectReady', { domain: cfg.domain }), 'ok', {
+                    action: { label: t('openInBrowser'), url: `${cfg.ssl ? 'https' : 'http'}://${cfg.domain}` },
+                });
+            } else {
+                showToast(t('projectCreated', { name }), 'ok');
+            }
             return true;
         } catch (e) {
             console.error('createProject error:', e);

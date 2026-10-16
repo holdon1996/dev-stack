@@ -40,8 +40,8 @@ use db_tools::{mysql_dump, mysql_exec, mysql_import};
 const WINDOWS_STARTUP_TASK_NAME: &str = "DevStack Startup";
 const APP_UPDATE_API_URL: &str = "https://api.github.com/repos/holdon1996/dev-stack/releases/latest";
 
-struct AppState {
-    sys: Mutex<System>,
+pub(crate) struct AppState {
+    pub(crate) sys: Mutex<System>,
     last_process_refresh: AtomicU64, // epoch ms of last refresh
     last_stats_refresh: AtomicU64,
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
@@ -861,20 +861,57 @@ fn greet(name: &str) -> String {
 
 #[tauri::command(async)]
 fn check_ports_status(ports: Vec<u16>) -> Vec<bool> {
-    use std::net::{Ipv4Addr, SocketAddr, TcpStream};
-    use std::time::Duration;
-    // Connect-based detection is reliable on Windows: a listener (XAMPP, DevStack Apache, etc.)
-    // accepts at once -> busy. It avoids SO_REUSEADDR false-negatives from bind() and IPv6
-    // false-positives. A free loopback port is refused only after ~2 s of SYN retries on Windows,
-    // so every free port waits out the timeout: probe all ports in parallel, not one by one.
-    let busy = |port: u16| {
-        port != 0
-            && TcpStream::connect_timeout(&SocketAddr::from((Ipv4Addr::LOCALHOST, port)), Duration::from_millis(150)).is_ok()
-    };
-    std::thread::scope(|s| {
-        let probes: Vec<_> = ports.iter().map(|&port| s.spawn(move || busy(port))).collect();
-        probes.into_iter().map(|p| p.join().unwrap_or(false)).collect()
-    })
+    // The OS listener table answers in ~0.1 ms. Probing with connect() made every free port
+    // wait out a timeout (a refused loopback connect takes ~2 s on Windows), ~165 ms a call.
+    let open = listening_ports();
+    ports.iter().map(|port| *port != 0 && open.contains(port)).collect()
+}
+
+/// TCP ports something listens on: every IPv4 listener, plus IPv6 listeners on `[::]`
+/// (dual-stack sockets also accept IPv4). An IPv6-only `[::1]` listener does not block
+/// DevStack's IPv4 services, so it does not count.
+#[cfg(target_os = "windows")]
+fn listening_ports() -> std::collections::HashSet<u16> {
+    use windows_sys::Win32::Foundation::NO_ERROR;
+    use windows_sys::Win32::NetworkManagement::IpHelper::GetExtendedTcpTable;
+    use windows_sys::Win32::Networking::WinSock::{AF_INET, AF_INET6};
+    const TCP_TABLE_OWNER_PID_LISTENER: i32 = 3;
+
+    let mut ports = std::collections::HashSet::new();
+    // MIB_TCPROW_OWNER_PID is 24 bytes with the port at offset 8; MIB_TCP6ROW_OWNER_PID is
+    // 56 bytes with the 16-byte local address first and the port at offset 20.
+    for (family, row_size, port_at) in [(AF_INET as u32, 24usize, 8usize), (AF_INET6 as u32, 56, 20)] {
+        // The table can grow between the size query and the read: retry a few times.
+        let mut table = None;
+        for _ in 0..3 {
+            let mut size = 0u32;
+            unsafe { GetExtendedTcpTable(std::ptr::null_mut(), &mut size, 0, family, TCP_TABLE_OWNER_PID_LISTENER, 0) };
+            let mut buf = vec![0u8; size as usize + 1024];
+            size = buf.len() as u32;
+            let ret = unsafe { GetExtendedTcpTable(buf.as_mut_ptr() as *mut _, &mut size, 0, family, TCP_TABLE_OWNER_PID_LISTENER, 0) };
+            if ret == NO_ERROR {
+                table = Some(buf);
+                break;
+            }
+        }
+        let Some(buf) = table else { continue };
+        let count = u32::from_le_bytes(buf[0..4].try_into().unwrap_or([0; 4])) as usize;
+        for i in 0..count {
+            let row = 4 + i * row_size;
+            let Some(bytes) = buf.get(row..row + row_size) else { break };
+            if family == AF_INET6 as u32 && bytes[..16].iter().any(|b| *b != 0) {
+                continue;
+            }
+            // The port is in network byte order in the low two bytes of the DWORD.
+            ports.insert(u16::from_be_bytes([bytes[port_at], bytes[port_at + 1]]));
+        }
+    }
+    ports
+}
+
+#[cfg(not(target_os = "windows"))]
+fn listening_ports() -> std::collections::HashSet<u16> {
+    std::collections::HashSet::new()
 }
 
 #[tauri::command(async)]
@@ -892,8 +929,16 @@ fn dir_prefix(dir: &str) -> Option<String> {
 /// Kills processes named `name` whose executable lives under `under_dir`.
 /// The app runs elevated, so a bare name match would also kill other tools'
 /// php.exe / httpd.exe / mysqld.exe; a process whose path cannot be read is spared.
+/// Refreshes what DevStack reads from processes: name, exe (once), memory, parent and start
+/// time. CPU/disk usage, command lines and environments are skipped (about half the cost).
+pub(crate) fn refresh_processes_light(sys: &mut System) {
+    use sysinfo::{ProcessRefreshKind, UpdateKind};
+    let kind = ProcessRefreshKind::nothing().with_memory().with_exe(UpdateKind::OnlyIfNotSet);
+    sys.refresh_processes_specifics(ProcessesToUpdate::All, true, kind);
+}
+
 fn kill_by_name_under(sys: &mut System, name: &str, under_dir: Option<&str>) -> bool {
-    sys.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
+    refresh_processes_light(sys);
     let target_name = name.to_lowercase();
     let prefix = under_dir.and_then(dir_prefix);
     let mut any_killed = false;
@@ -985,7 +1030,7 @@ fn stop_devstack_processes(app: &tauri::AppHandle) {
     let Some(prefix) = dir.as_deref().and_then(dir_prefix) else { return };
     // One process scan for all service binaries (a full scan per name took ~1 s in total).
     let mut sys = state.sys.lock().unwrap();
-    sys.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
+    refresh_processes_light(&mut sys);
     for process in sys.processes().values() {
         let name = process.name().to_str().unwrap_or("").to_lowercase();
         let exe = process.exe().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_default();
@@ -1078,15 +1123,8 @@ fn find_listening_pid(port: u16) -> Option<u32> {
 }
 
 #[tauri::command(async)]
-fn kill_process_by_port(state: tauri::State<'_, AppState>, port: u16) -> bool {
-    if let Some(pid) = find_listening_pid(port) {
-        let mut sys = state.sys.lock().unwrap();
-        sys.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
-        if let Some(proc) = sys.process(sysinfo::Pid::from_u32(pid)) {
-            return terminate_pid(proc.pid().as_u32());
-        }
-    }
-    false
+fn kill_process_by_port(port: u16) -> bool {
+    find_listening_pid(port).is_some_and(terminate_pid)
 }
 
 #[tauri::command(async)]
@@ -2532,7 +2570,7 @@ fn scan_processes(state: tauri::State<'_, AppState>, dev_dir: String) -> Vec<ser
         .as_millis() as u64;
     let last = state.last_process_refresh.load(Ordering::Relaxed);
     if now - last > 500 {
-        sys.refresh_processes(ProcessesToUpdate::All, true);
+        refresh_processes_light(&mut sys);
         state.last_process_refresh.store(now, Ordering::Relaxed);
     }
     
@@ -2769,7 +2807,8 @@ async fn install_binary(
     let mut body = res.bytes_stream();
     let mut bytes = Vec::new();
     let mut downloaded: u64 = 0;
-    let mut last_emit: u64 = 0;
+    // Progress at most every 100 ms: per 64 KB it was ~4,000 UI updates for a 250 MB MySQL zip.
+    let mut last_emit = std::time::Instant::now();
     use futures_util::StreamExt;
 
     while let Some(chunk) = body.next().await {
@@ -2777,9 +2816,8 @@ async fn install_binary(
         bytes.extend_from_slice(&chunk);
         downloaded += chunk.len() as u64;
 
-        // Throttle: emit every 64KB for smooth progress updates
-        if downloaded - last_emit >= 64 * 1024 {
-            last_emit = downloaded;
+        if last_emit.elapsed() >= std::time::Duration::from_millis(100) {
+            last_emit = std::time::Instant::now();
             let downloaded_mb = (downloaded as f64 / 1024.0 / 1024.0 * 100.0).round() / 100.0;
 
             if total_size > 0 {
@@ -2988,15 +3026,16 @@ async fn download_file_with_progress(
     let mut bytes = Vec::new();
     let mut body = res.bytes_stream();
     let mut downloaded: u64 = 0;
-    let mut last_emit: u64 = 0;
+    // Progress at most every 100 ms: per 64 KB it was ~4,000 UI updates for a 250 MB MySQL zip.
+    let mut last_emit = std::time::Instant::now();
 
     while let Some(chunk) = body.next().await {
         let chunk = chunk.map_err(|e| e.to_string())?;
         bytes.extend_from_slice(&chunk);
         downloaded += chunk.len() as u64;
 
-        if downloaded - last_emit >= 64 * 1024 {
-            last_emit = downloaded;
+        if last_emit.elapsed() >= std::time::Duration::from_millis(100) {
+            last_emit = std::time::Instant::now();
             let downloaded_mb = (downloaded as f64 / 1024.0 / 1024.0 * 100.0).round() / 100.0;
 
             if total_size > 0 {
@@ -3391,7 +3430,9 @@ pub fn run() {
 
     tauri::Builder::default()
         .manage(AppState {
-            sys: Mutex::new(System::new_all()),
+            // Empty: a full scan here (~0.4 s) ran on the main thread before the window showed.
+            // The first scan_processes / get_system_stats fill it on worker threads.
+            sys: Mutex::new(System::new()),
             last_process_refresh: AtomicU64::new(0),
             last_stats_refresh: AtomicU64::new(0),
             #[cfg(not(any(target_os = "android", target_os = "ios")))]

@@ -26,8 +26,12 @@ const Section = ({ title, help, children }) => (
   </section>
 );
 
+// One shared empty list: a new `[]` per call makes zustand see a change on every render
+// (React "Maximum update depth exceeded" for a process that has not printed anything yet).
+const NO_LINES = [];
+
 export const ProcessLog = ({ id }) => {
-  const lines = useStore(s => s.procLogs[id] || []);
+  const lines = useStore(s => s.procLogs[id] || NO_LINES);
   const ref = React.useRef(null);
   useEffect(() => { if (ref.current) ref.current.scrollTop = ref.current.scrollHeight; }, [lines]);
   return (

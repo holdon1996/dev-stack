@@ -37,6 +37,38 @@ const GroupBar = () => {
   );
 };
 
+/**
+ * A site's PHP right in the list. For a FastCGI site a new version only swaps its pool
+ * (applySites restarts Apache only when the vhosts change, e.g. to or from mod_php).
+ */
+const SitePhpSelect = ({ site, cfg }) => {
+  const { phpVersions, saveSiteConfig, siteApplying, showToast, t } = useStore();
+  const installed = phpVersions.filter(v => v.installed);
+  const value = cfg.phpMode === 'module' ? 'module' : (cfg.phpVersion || '');
+  return (
+    <select
+      aria-label={t('sitePhpVersion')}
+      className="bg-bg border border-border rounded-lg text-[12px] font-mono px-2 py-1 outline-none text-textDim w-full cursor-pointer hover:border-accent/50 disabled:opacity-50"
+      value={value}
+      disabled={siteApplying}
+      onChange={async e => {
+        const next = e.target.value === 'module'
+          ? { ...cfg, phpMode: 'module', phpVersion: '' }
+          : { ...cfg, phpMode: 'fcgi', phpVersion: e.target.value };
+        const label = e.target.selectedOptions[0]?.text || e.target.value;
+        if (await saveSiteConfig(site.key, next)) showToast(t('sitePhpChanged', { domain: cfg.domain, php: label }), 'ok');
+      }}
+    >
+      <option value="">{t('phpActiveShort', { version: phpVersions.find(v => v.active && v.installed)?.version || '?' })}</option>
+      {installed.map(v => <option key={v.version} value={v.version}>PHP {v.version}</option>)}
+      {cfg.phpVersion && !installed.some(v => v.version === cfg.phpVersion) && (
+        <option value={cfg.phpVersion}>{t('phpVersionNotInstalledOption', { version: cfg.phpVersion })}</option>
+      )}
+      <option value="module">mod_php</option>
+    </select>
+  );
+};
+
 const PageSites = () => {
   const { sites, scanSites, showToast, t, siteConfigs, procs, siteProcessId, enableSite, siteApplying } = useStore();
   const [isCreating, setIsCreating] = useState(false);
@@ -148,9 +180,10 @@ const PageSites = () => {
       <div className="flex-1 overflow-y-auto p-5 px-6">
         <GroupBar />
         <div className="bg-surface border border-border rounded-xl overflow-hidden">
-          <div className="px-4.5 py-3.5 border-b border-border grid grid-cols-[2fr_90px_2fr_70px_150px] gap-3 text-[11px] text-muted font-bold tracking-widest uppercase bg-surface">
+          <div className="px-4.5 py-3.5 border-b border-border grid grid-cols-[2fr_90px_150px_2fr_70px_150px] gap-3 text-[11px] text-muted font-bold tracking-widest uppercase bg-surface">
             <span>{t('domain')}</span>
             <span>{t('siteType')}</span>
+            <span>PHP</span>
             <span>{t('rootPath')}</span>
             <span>{t('processesShort')}</span>
             <span className="text-right">{t('action')}</span>
@@ -162,15 +195,21 @@ const PageSites = () => {
               const managed = !!cfg?.managed;
               const running = runningCount(site);
               return (
-                <div key={site.id} className="service-row grid grid-cols-[2fr_90px_2fr_70px_150px] gap-3 items-center">
+                <div key={site.id} className="service-row grid grid-cols-[2fr_90px_150px_2fr_70px_150px] gap-3 items-center">
                   <div className="min-w-0">
-                    <div
-                      className="text-[13px] font-bold text-info font-mono truncate cursor-pointer hover:text-accent hover:underline flex items-center gap-1.5"
-                      onClick={() => openInBrowser(site)}
-                    >
-                      {site.ssl && <Lock size={12} className="text-accent shrink-0" />}
-                      {site.ssl ? 'https' : 'http'}://{site.domain} <ExternalLink size={12} className="shrink-0" />
-                    </div>
+                    {managed ? (
+                      <button
+                        type="button"
+                        className="text-[13px] font-bold text-info font-mono truncate cursor-pointer hover:text-accent hover:underline flex items-center gap-1.5 max-w-full"
+                        onClick={() => openInBrowser(site)}
+                      >
+                        {site.ssl && <Lock size={12} className="text-accent shrink-0" />}
+                        {site.ssl ? 'https' : 'http'}://{site.domain} <ExternalLink size={12} className="shrink-0" />
+                      </button>
+                    ) : (
+                      // Not linked yet: no vhost or hosts entry, so a link would only fail with a DNS error.
+                      <div className="text-[13px] font-bold text-muted font-mono truncate" title={t('createVhostSync')}>{site.domain}</div>
+                    )}
                     {managed && cfg.aliases?.length > 0 && (
                       <div className="text-[11px] text-muted font-mono truncate">{cfg.aliases.join(', ')}</div>
                     )}
@@ -180,6 +219,11 @@ const PageSites = () => {
                     {managed
                       ? <span className="tag font-mono text-[11px]">{cfg.type}{cfg.type === 'proxy' ? `:${cfg.proxyPort}` : ''}</span>
                       : <span className="text-[11px] text-muted">{t('notManaged')}</span>}
+                  </div>
+                  <div>
+                    {managed && cfg.type !== 'proxy' ? (
+                      <SitePhpSelect site={site} cfg={cfg} />
+                    ) : <span className="text-[11px] text-muted">—</span>}
                   </div>
                   <div className="text-[12px] text-muted font-mono truncate" title={site.path}>
                     {site.path}{managed && cfg.docRoot ? <span className="text-textDim">/{cfg.docRoot}</span> : null}

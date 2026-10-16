@@ -418,7 +418,7 @@ export const createSiteSlice = (set, get) => ({
         const hosts = siteHosts(site.cfg);
         const signature = hosts.join(',');
         const exists = await invoke('path_exists', { path: win(`${certDir}/${site.key}.pem`) });
-        if (exists && site.cfg.certHosts === signature) return;
+        if (exists && site.cfg.certHosts === signature) return false;
         const info = await invoke('mkcert_generate', {
             mkcertExe: getMkcertPath(get().settings),
             certDir: win(certDir),
@@ -426,6 +426,7 @@ export const createSiteSlice = (set, get) => ({
             hosts,
         });
         get()._patchSiteConfig(site.key, { certHosts: signature, certNotAfter: info.notAfter || '' });
+        return true; // a new certificate: Apache loads it only on restart
     },
 
     regenerateCert: async (key) => {
@@ -457,10 +458,13 @@ export const createSiteSlice = (set, get) => ({
         try {
             await invoke('create_dir', { path: win(logDir) });
             let managed = get()._managedSites();
+            let certsChanged = false;
 
             if (managed.some(s => s.cfg.ssl)) {
                 if (!(await get().ensureMkcertCa())) return false;
-                for (const site of managed.filter(s => s.cfg.ssl)) await get()._ensureSiteCert(site, certDir);
+                for (const site of managed.filter(s => s.cfg.ssl)) {
+                    if (await get()._ensureSiteCert(site, certDir)) certsChanged = true;
+                }
                 const owner = await invoke('port_owner', { port: 443 });
                 if (owner && !/^httpd/i.test(owner.name)) {
                     showToast(t('port443Busy', { name: owner.service || owner.name, pid: owner.pid }), 'danger');
@@ -492,8 +496,10 @@ export const createSiteSlice = (set, get) => ({
             await get()._remindOldFcgiSetup(report);
 
             const apacheRunning = get().services.find(s => s.type === 'web')?.status === 'running';
+            // Only a changed config or certificate needs Apache restarted (every site briefly
+            // down). A FastCGI site's new PHP version is just a pool swap, done above.
             // apply_apache_sites has just run `httpd -t` on exactly this config.
-            if (restart && apacheRunning) await get().restartApache({ configVerified: true });
+            if (restart && apacheRunning && (report.changed || certsChanged)) await get().restartApache({ configVerified: true });
             return true;
         } catch (e) {
             const message = typeof e === 'string' ? e : e?.message || String(e);
@@ -633,6 +639,18 @@ export const createSiteSlice = (set, get) => ({
         const { invoke } = await import('@tauri-apps/api/core');
         await invoke('kill_process_by_name_exact', { name: 'php-cgi.exe' }).catch(() => false);
         if (get().services.find(s => s.type === 'web')?.status === 'running') await get().ensureFcgiBackends();
+    },
+
+    /** Restarts one site's pool, e.g. after php-cgi kept crashing and its supervisor gave up. */
+    restartFcgiPool: async (key) => {
+        if (get().services.find(s => s.type === 'web')?.status !== 'running') {
+            get().showToast(get().t('fcgiPoolNeedsApache'), 'warn');
+            return false;
+        }
+        const ids = Object.keys(get().procs).filter(id => id.startsWith(`fcgi:${key}:`));
+        await Promise.all(ids.map(id => get().stopProcess(id)));
+        await get().ensureFcgiBackends();
+        return true;
     },
 
     stopFcgiPools: async () => {

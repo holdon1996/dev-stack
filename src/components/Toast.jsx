@@ -23,6 +23,7 @@ const Toast = () => {
   const { action } = toast;
   const runAction = () => {
     if (action.guide !== undefined) return openGuide(action.guide);
+    if (action.url) return import('@tauri-apps/plugin-opener').then(({ openUrl }) => openUrl(action.url));
     if (action.log) useStore.getState().switchLog(action.log);
     setActivePage(action.page);
   };

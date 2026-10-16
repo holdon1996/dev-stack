@@ -259,6 +259,9 @@ pub struct ApplyReport {
     removed_manual_ssl: bool,
     /// A hand-written `# >>> ... >>>` region or balancer is still outside the DevStack block.
     manual_block_left: bool,
+    /// httpd.conf or httpd-vhosts.conf was rewritten: a running Apache needs a restart. When
+    /// false (e.g. only a FastCGI site's PHP version changed), swapping its pool is enough.
+    changed: bool,
 }
 
 /// Writes the managed SITES block, removes conflicting hand-written vhosts, and
@@ -309,6 +312,7 @@ pub fn apply_apache_sites(
     if new_vhosts != old_vhosts {
         let _ = fs::write(vhosts_path.with_extension("conf.devstack.bak"), &old_vhosts);
     }
+    let changed = new_httpd != old_httpd || new_vhosts != old_vhosts;
     write_if_changed(&httpd_path, &old_httpd, &new_httpd)?;
     write_if_changed(&vhosts_path, &old_vhosts, &new_vhosts)?;
 
@@ -325,7 +329,7 @@ pub fn apply_apache_sites(
         .collect();
     removed_hosts.sort();
 
-    Ok(ApplyReport { removed_legacy_vhosts, removed_hosts, removed_manual_ssl, manual_block_left })
+    Ok(ApplyReport { removed_legacy_vhosts, removed_hosts, removed_manual_ssl, manual_block_left, changed })
 }
 
 fn modified_secs(path: &Path) -> u64 {
@@ -339,22 +343,27 @@ fn modified_secs(path: &Path) -> u64 {
 /// True when httpd.conf, conf/extra/*.conf or php.ini changed after the running
 /// DevStack Apache started, i.e. a restart is needed to pick the change up.
 #[tauri::command(async)]
-pub fn apache_config_stale(apache_root: String, php_ini: Option<String>) -> bool {
-    use sysinfo::{ProcessesToUpdate, System};
-
+pub fn apache_config_stale(state: tauri::State<'_, crate::AppState>, apache_root: String, php_ini: Option<String>) -> bool {
     let root = PathBuf::from(&apache_root);
     let exe = httpd_exe(&root).to_string_lossy().replace('/', "\\").to_ascii_lowercase();
-    let mut sys = System::new();
-    sys.refresh_processes(ProcessesToUpdate::All, true);
-    let started = sys
-        .processes()
-        .values()
-        .filter(|p| {
-            p.exe()
-                .is_some_and(|e| e.to_string_lossy().replace('/', "\\").to_ascii_lowercase() == exe)
-        })
-        .map(|p| p.start_time())
-        .min();
+    let httpd_started = |sys: &sysinfo::System| {
+        sys.processes()
+            .values()
+            .filter(|p| p.exe().is_some_and(|e| e.to_string_lossy().replace('/', "\\").to_ascii_lowercase() == exe))
+            .map(|p| p.start_time())
+            .min()
+    };
+    // The service poll refreshed the shared process list just before this check: reuse it,
+    // and scan again only when httpd is not in it (e.g. Apache was restarted meanwhile).
+    let mut sys = state.sys.lock().unwrap_or_else(|e| e.into_inner());
+    let started = match httpd_started(&sys) {
+        Some(started) => Some(started),
+        None => {
+            crate::refresh_processes_light(&mut sys);
+            httpd_started(&sys)
+        }
+    };
+    drop(sys);
     let Some(started) = started else { return false };
 
     let mut files = vec![root.join("conf").join("httpd.conf")];
@@ -474,22 +483,46 @@ pub struct PortOwner {
 }
 
 /// Windows service hosted by `pid`, parsed from `tasklist /svc` CSV output.
+/// Name of the running Windows service hosted by `pid` (empty when none), read from the
+/// service manager directly: `tasklist /svc` took ~0.4 s per lookup.
+#[cfg(target_os = "windows")]
 fn service_for_pid(pid: u32) -> String {
-    let Ok(output) = hidden_command("tasklist")
-        .args(["/svc", "/fo", "csv", "/nh", "/fi", &format!("PID eq {pid}")])
-        .output()
-    else {
-        return String::new();
+    use windows_sys::Win32::System::Services::{
+        CloseServiceHandle, EnumServicesStatusExW, OpenSCManagerW, ENUM_SERVICE_STATUS_PROCESSW,
+        SC_ENUM_PROCESS_INFO, SC_MANAGER_ENUMERATE_SERVICE, SERVICE_ACTIVE, SERVICE_WIN32,
     };
-    parse_tasklist_service(&String::from_utf8_lossy(&output.stdout))
+    unsafe {
+        let scm = OpenSCManagerW(std::ptr::null(), std::ptr::null(), SC_MANAGER_ENUMERATE_SERVICE);
+        if scm.is_null() {
+            return String::new();
+        }
+        let (mut needed, mut count, mut resume) = (0u32, 0u32, 0u32);
+        EnumServicesStatusExW(scm, SC_ENUM_PROCESS_INFO, SERVICE_WIN32, SERVICE_ACTIVE, std::ptr::null_mut(), 0, &mut needed, &mut count, &mut resume, std::ptr::null());
+        // u64 storage keeps the entry structs aligned; the name strings live in the same buffer.
+        let mut buf = vec![0u64; (needed as usize + 4096) / 8 + 1];
+        let ok = EnumServicesStatusExW(
+            scm, SC_ENUM_PROCESS_INFO, SERVICE_WIN32, SERVICE_ACTIVE,
+            buf.as_mut_ptr() as *mut u8, (buf.len() * 8) as u32, &mut needed, &mut count, &mut resume, std::ptr::null(),
+        );
+        CloseServiceHandle(scm);
+        if ok == 0 {
+            return String::new();
+        }
+        let entries = std::slice::from_raw_parts(buf.as_ptr() as *const ENUM_SERVICE_STATUS_PROCESSW, count as usize);
+        entries
+            .iter()
+            .find(|e| e.ServiceStatusProcess.dwProcessId == pid && !e.lpServiceName.is_null())
+            .map(|e| {
+                let len = (0..).take_while(|&i| *e.lpServiceName.add(i) != 0).count();
+                String::from_utf16_lossy(std::slice::from_raw_parts(e.lpServiceName, len))
+            })
+            .unwrap_or_default()
+    }
 }
 
-fn parse_tasklist_service(csv: &str) -> String {
-    let fields: Vec<&str> = csv.lines().next().unwrap_or("").split("\",\"").collect();
-    match fields.get(2).map(|f| f.trim().trim_matches('"')) {
-        Some(service) if !service.is_empty() && service != "N/A" => service.to_string(),
-        _ => String::new(),
-    }
+#[cfg(not(target_os = "windows"))]
+fn service_for_pid(_pid: u32) -> String {
+    String::new()
 }
 
 /// Who is listening on `port`: process name, PID, exe path and Windows service.
@@ -913,10 +946,19 @@ R1O7Cr8GyxmTVH054MJLVX+3NEfn9yoEbSPc1SGfo5VYetg9UzBmo2za
     }
 
     #[test]
-    fn parses_service_from_tasklist() {
-        assert_eq!(parse_tasklist_service("\"redis-server.exe\",\"4321\",\"Redis\"\r\n"), "Redis");
-        assert_eq!(parse_tasklist_service("\"node.exe\",\"1\",\"N/A\"\r\n"), "");
-        assert_eq!(parse_tasklist_service("INFO: No tasks are running"), "");
+    fn service_lookup_matches_tasklist() {
+        assert_eq!(service_for_pid(std::process::id()), "");
+        // Cross-check against `tasklist /svc` for a process that hosts exactly one service.
+        let out = hidden_command("tasklist").args(["/svc", "/fo", "csv", "/nh"]).output().unwrap();
+        let text = String::from_utf8_lossy(&out.stdout);
+        let single = text.lines().find_map(|line| {
+            let fields: Vec<&str> = line.split("\",\"").map(|f| f.trim_matches('"')).collect();
+            let service = fields.get(2)?.trim();
+            (!service.is_empty() && service != "N/A" && !service.contains(',')).then(|| (fields[1].parse::<u32>().ok(), service.to_string()))
+        });
+        if let Some((Some(pid), service)) = single {
+            assert!(service_for_pid(pid).eq_ignore_ascii_case(&service), "pid {pid}: expected {service}");
+        }
     }
 
     #[test]

@@ -37,15 +37,21 @@ export const createUiSlice = (set, get) => ({
         set({ activePage: page });
     },
 
-    /** `action`: optional `{ label, page }` or `{ label, guide: '<anchor>' }` button (e.g. "How to fix"). */
-    showToast: (msg, type = 'ok', { action } = {}) => {
-        // An error stays readable: a following progress message must not replace it. A result
-        // (ok / warn) does, so a successful retry is not hidden behind the old error.
+    /**
+     * `action`: optional `{ label, page }`, `{ label, guide: '<anchor>' }` or `{ label, url }` button.
+     * `key`: the source (e.g. `svc:2` for MySQL). A visible error or warning is not replaced by
+     * progress or success from another source (Apache "running" must not hide MySQL's failure),
+     * but the same source may replace it (a successful retry clears its own old error).
+     */
+    showToast: (msg, type = 'ok', { action, key } = {}) => {
         const current = get().toast;
-        if (current.show && current.type === 'danger' && type === 'info') return;
+        const sameSource = key && current.key === key;
+        const protectedNow = current.show && !sameSource
+            && ((current.type === 'danger' && type !== 'danger') || (current.type === 'warn' && (type === 'ok' || type === 'info')));
+        if (protectedNow) return;
         // A newer toast must not be hidden by the previous toast's timer.
         clearTimeout(toastTimer);
-        set({ toast: { show: true, msg, type, action } });
+        set({ toast: { show: true, msg, type, action, key } });
         if (type === 'danger') get().recordAppIssue?.(`[toast] ${msg}`, 'err', { fileOnly: true });
         toastTimer = setTimeout(() => {
             set({ toast: { show: false, msg: '', type: 'ok' } });
@@ -251,8 +257,10 @@ export const createUiSlice = (set, get) => ({
             const { invoke } = await import('@tauri-apps/api/core');
             const stats = await invoke('get_system_stats');
             if (stats) {
-                // Return data is in GB from Rust
-                set({ systemStats: { cpu: stats.cpu, ram: stats.used_ram, ramTotal: stats.total_ram } });
+                // Return data is in GB from Rust. Unchanged values: no update and no re-render.
+                const next = { cpu: stats.cpu, ram: stats.used_ram, ramTotal: stats.total_ram };
+                const prev = get().systemStats;
+                if (next.cpu !== prev.cpu || next.ram !== prev.ram || next.ramTotal !== prev.ramTotal) set({ systemStats: next });
             }
         } catch (e) {
             console.error('Rust get_system_stats failed:', e);

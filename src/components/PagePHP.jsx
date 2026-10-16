@@ -421,8 +421,7 @@ const PagePHP = () => {
                         key={ext}
                         className="text-left px-3 py-2 rounded-xl hover:bg-accent/10 hover:text-accent text-[12px] font-medium transition-all duration-200 ease-liquid border border-transparent hover:border-accent/20"
                         onClick={() => {
-                          addExtension(ext);
-                          showToast(t('extensionAdded', { ext }), 'ok');
+                          addExtension(ext); // reports success or failure itself
                           setExtSearch('');
                           setShowExtPicker(false);
                         }}

@@ -51,34 +51,6 @@ export const createPhpSlice = (set, get) => ({
         }
     },
 
-    setPhpActive: (version) => set(s => ({
-        phpVersions: s.phpVersions.map(v => ({
-            ...v,
-            active: v.version === version
-        }))
-    })),
-
-    // Killer feature logic: Switch PHP version by project path
-    detectAndSwitchPhpForProject: async (projectPath) => {
-        // Read .devstack JSON file natively using tauri-plugin-fs
-        try {
-            const { readTextFile } = await import('@tauri-apps/plugin-fs');
-            const devstackFile = projectPath.replace(/\\/g, '/') + '/.devstack';
-            const content = await readTextFile(devstackFile);
-            const data = JSON.parse(content);
-            if (data?.php) {
-                const version = data.php.trim();
-                const match = get().phpVersions.find(v => v.version.startsWith(version));
-                if (match && !match.active) {
-                    get().setPhpActive(match.version);
-                    get().showToast(`Switched PHP to ${match.version} for project`, 'info');
-                }
-            }
-        } catch {
-            // .devstack file doesn't exist or can't be parsed — that's fine
-        }
-    },
-
     detectedPhpVersion: null,
     conflictPath: null,
     isSystemConflict: false,
@@ -508,18 +480,17 @@ export const createPhpSlice = (set, get) => ({
 
         try {
             const { invoke } = await import('@tauri-apps/api/core');
-            const ok = await invoke('enable_php_extension', { iniPath, ext });
-            if (!ok) {
-                get().showToast(`Extension ${ext} not found in php.ini`, 'warn');
-                return;
-            }
+            // Uncomments `;extension=x` (or `php_x.dll`) and appends the line when the ini has none.
+            await invoke('ensure_php_extension', { iniPath, ext });
             await get().syncExtensionsFromActivePhp();
         } catch (e) {
-            console.error('addExtension failed:', e);
-            get().showToast(`Failed to enable ${ext}`, 'danger');
-            return;
+            get().showToast(get().t('extensionAddFailed', { ext, error: `${e}` }), 'danger');
+            return false;
         }
-        get().showToast(`Extension ${ext} enabled`, 'ok');
+        get().showToast(get().t('extensionAdded', { ext }), 'ok');
+        // php-cgi pools (and mod_php) load extensions at start.
+        if (get().services.find(s => s.type === 'web')?.status === 'running') await get().restartApache();
+        return true;
     },
 
     removeExtension: async (ext) => {

@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { useStore } from '../store';
-import { Play, Pause, RotateCcw, Globe, Database, Cpu, Zap, Loader, Power, Mail, HardDrive, ExternalLink, Terminal, Plus, Download, LifeBuoy, X } from 'lucide-react';
+import { Play, Pause, RotateCcw, Globe, Database, Cpu, Zap, Loader, Power, Mail, HardDrive, ExternalLink, Terminal, Plus, Download, LifeBuoy, X, ScrollText, AlertTriangle } from 'lucide-react';
 import { ConfigStaleBadge } from './PageSites';
+import { ProcessLog } from './SiteConfigModal';
 
 const openUrl = async (url) => {
   const { openUrl: open } = await import('@tauri-apps/plugin-opener');
@@ -28,6 +29,10 @@ const ServiceRow = ({ service }) => {
   const Icon = service.type === 'web' ? Globe : service.type === 'db' ? Database : service.type === 'php' ? Cpu : service.type === 'mail' ? Mail : service.type === 'storage' ? HardDrive : Zap;
   const t = useStore.getState().t;
   const owner = service.status !== 'running' && !service.useExternal ? service.portOwner : null;
+  useStore(s => s.procs); // re-render when pool processes change (for deadPools)
+  const deadPools = service.type === 'web' && service.status === 'running'
+    ? useStore.getState().fcgiPools().filter(p => p.ports.length && p.alive === 0).map(p => p.key)
+    : [];
 
   // Get relevant versions for the dropdown
   const getVersions = () => {
@@ -62,6 +67,12 @@ const ServiceRow = ({ service }) => {
           <div className={`text-[11px] font-mono truncate ${owner ? 'text-danger' : 'text-muted'}`} title={service.path || owner?.exe}>
             {service.path || (owner ? t('externalHoldsPort') : service.useExternal ? t('usingExternalService') : t('notRunning'))}
           </div>
+          {deadPools.length > 0 && (
+            // Apache answers, but these sites return 503: their php-cgi pool is down.
+            <div className="text-[11px] text-warn flex items-center gap-1 truncate" title={deadPools.join(', ')}>
+              <AlertTriangle size={11} className="shrink-0" /> {t('fcgiPoolDownWarn', { sites: deadPools.join(', ') })}
+            </div>
+          )}
           {service.type === 'mail' && (
             <button type="button" className="text-[11px] text-accent hover:underline flex items-center gap-1" onClick={() => openUrl(`http://127.0.0.1:${useStore.getState().settings.mailUiPort || 8025}`)}>
               <ExternalLink size={10} /> {t('openMailpitUi')}
@@ -249,9 +260,11 @@ const MinioPanel = () => {
 };
 
 const FcgiPools = () => {
-  const { fcgiPools, procs, setActivePage, t } = useStore();
+  const { fcgiPools, procs, setActivePage, restartFcgiPool, fcgiProcessId, t } = useStore();
   void procs; // re-render when pool processes change
   const pools = fcgiPools();
+  const [openLog, setOpenLog] = useState(null);
+  const [restarting, setRestarting] = useState(null);
   const status = (pool) => {
     if (pool.missingPhp) return { text: t('fcgiPoolNoPhp'), cls: 'text-danger', page: 'php' };
     if (!pool.ports.length) return { text: t('fcgiPoolNotApplied'), cls: 'text-warn', page: 'sites' };
@@ -275,16 +288,37 @@ const FcgiPools = () => {
         {pools.map(pool => {
           const st = status(pool);
           return (
-            <div key={pool.key} className="grid grid-cols-[1fr_90px_minmax(90px,auto)_1fr] gap-3 items-center text-[12px]">
-              <span className="font-bold truncate" title={pool.key}>{pool.key}</span>
-              <span className="font-mono text-textDim">{pool.version ? `PHP ${pool.version}` : '-'}</span>
-              {st.page ? (
-                <button type="button" className={`font-mono font-bold text-left underline ${st.cls}`} onClick={() => setActivePage(st.page)}>{st.text}</button>
-              ) : (
-                <span className={`font-mono font-bold ${st.cls}`}>{st.text}</span>
-              )}
-              <span className="font-mono text-muted truncate">{pool.ports.join(', ')}</span>
-            </div>
+            <React.Fragment key={pool.key}>
+              <div className="grid grid-cols-[1fr_90px_minmax(90px,auto)_1fr_auto] gap-3 items-center text-[12px]">
+                <span className="font-bold truncate" title={pool.key}>{pool.key}</span>
+                <span className="font-mono text-textDim">{pool.version ? `PHP ${pool.version}` : '-'}</span>
+                {st.page ? (
+                  <button type="button" className={`font-mono font-bold text-left underline ${st.cls}`} onClick={() => setActivePage(st.page)}>{st.text}</button>
+                ) : (
+                  <span className={`font-mono font-bold ${st.cls}`}>{st.text}</span>
+                )}
+                <span className="font-mono text-muted truncate">{pool.ports.join(', ')}</span>
+                {pool.ports.length > 0 && (
+                  <span className="flex gap-1">
+                    {/* php-cgi output (missing DLL, broken php.ini): the reason a pool keeps dying. */}
+                    <button type="button" className="btn-ghost p-1.5" title={t('showLog')} aria-label={t('showLog')} onClick={() => setOpenLog(openLog === pool.key ? null : pool.key)}>
+                      <ScrollText size={13} />
+                    </button>
+                    <button
+                      type="button"
+                      className="btn-ghost p-1.5"
+                      title={t('fcgiPoolRestart')}
+                      aria-label={t('fcgiPoolRestart')}
+                      disabled={restarting === pool.key}
+                      onClick={async () => { setRestarting(pool.key); await restartFcgiPool(pool.key); setRestarting(null); }}
+                    >
+                      {restarting === pool.key ? <Loader size={13} className="animate-spin" /> : <RotateCcw size={13} />}
+                    </button>
+                  </span>
+                )}
+              </div>
+              {openLog === pool.key && <ProcessLog id={fcgiProcessId(pool.key, pool.ports[0])} />}
+            </React.Fragment>
           );
         })}
       </div>
