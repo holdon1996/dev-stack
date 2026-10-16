@@ -59,11 +59,15 @@ export const SiteProcessList = ({ site, cfg }) => {
               <span className={`status-dot ${running ? 'dot-running' : 'dot-stopped'}`} />
               <span className="text-[12px] font-bold">{proc.name}</span>
               <code className="text-[11px] text-muted font-mono truncate flex-1" title={proc.command}>{proc.command}</code>
+              {/* Exited on its own (crash, or gave up after repeated crashes): show why it is not running. */}
+              {!running && procs[id]?.code != null && (
+                <span className="text-[11px] text-warn font-mono shrink-0">{t('processExited', { code: procs[id].code })}</span>
+              )}
               <button type="button" className="btn-ghost p-1.5" title={t('showLog')} onClick={() => setOpenLog(openLog === id ? null : id)}>
                 <ScrollText size={13} />
               </button>
               {running ? (
-                <button type="button" className="btn-danger p-1.5 border-none" title={t('stop')} onClick={() => stopSiteProcess(site, proc)}><Square size={12} /></button>
+                <button type="button" className="btn-ghost p-1.5" title={t('stop')} aria-label={t('stop')} onClick={() => stopSiteProcess(site, proc)}><Square size={12} /></button>
               ) : (
                 <button type="button" className="btn-ghost p-1.5 text-accent" title={t('start')} onClick={() => startSiteProcess(site, proc)}><Play size={12} /></button>
               )}
@@ -78,7 +82,7 @@ export const SiteProcessList = ({ site, cfg }) => {
 
 const SiteConfigModal = ({ site, onClose }) => {
   const {
-    siteConfigs, detectSiteConfig, saveSiteConfig, regenerateCert, phpVersions, groupNames,
+    siteConfigs, detectSiteConfig, saveSiteConfig, regenerateCert, phpVersions, nodeVersions, groupNames,
     groupEnvs, setGroupEnv, siteApplying, t,
   } = useStore();
   const saved = siteConfigs[site.key];
@@ -271,6 +275,18 @@ const SiteConfigModal = ({ site, onClose }) => {
           </Section>
 
           <Section title={t('siteSectionProcesses')} help={{ key: 'help_processes', anchor: 'recipe-team' }}>
+            {/* Node for this site's processes and terminal (npm run dev, build), like PHP per site. */}
+            <div className="grid grid-cols-[1fr_1fr] gap-3 mb-3">
+              <Field label={t('siteNodeVersion')} htmlFor="site-node" hint={t('siteNodeVersionHint')}>
+                <select id="site-node" className="select-field" value={draft.nodeVersion || ''} onChange={e => update({ nodeVersion: e.target.value })}>
+                  <option value="">{t('nodeActiveOption', { version: (nodeVersions || []).find(v => v.active)?.version || '?' })}</option>
+                  {(nodeVersions || []).map(v => <option key={v.version} value={v.version}>Node {v.version}</option>)}
+                  {draft.nodeVersion && !(nodeVersions || []).some(v => v.version === draft.nodeVersion) && (
+                    <option value={draft.nodeVersion}>{t('nodeVersionNotInstalledOption', { version: draft.nodeVersion })}</option>
+                  )}
+                </select>
+              </Field>
+            </div>
             {saved?.managed && <SiteProcessList site={site} cfg={saved} />}
             <div className="flex flex-col gap-2 mt-3">
               {custom.map((proc, i) => (
@@ -290,6 +306,8 @@ const SiteConfigModal = ({ site, onClose }) => {
                 {draft.type === 'laravel' && [
                   { name: 'queue', command: `php artisan queue:work`, autoRestart: true, cwd: draft.docRoot.replace(/\/?public$/, '') },
                   { name: 'schedule', command: 'php artisan schedule:work', autoRestart: true, cwd: draft.docRoot.replace(/\/?public$/, '') },
+                  // Laravel's frontend (Vite through laravel-vite-plugin) runs next to the PHP site.
+                  { name: 'vite', command: 'npm run dev', autoRestart: false, cwd: draft.docRoot.replace(/\/?public$/, '') },
                 ].filter(p => !custom.some(c => c.name === p.name)).map(p => (
                   <button key={p.name} type="button" className="btn-ghost text-[11px] py-1 px-2 border border-border flex items-center gap-1" onClick={() => update({ processes: [...custom, p] })}>
                     <Plus size={11} /> {p.command}

@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { useStore } from '../store';
-import { ExternalLink, Folder, Trash2, Lock, Link, Unlink, Settings2, Terminal, Play, Square, RotateCcw, AlertTriangle } from 'lucide-react';
+import { ExternalLink, Folder, Trash2, Lock, Link, Unlink, Settings2, Terminal, Play, Square, RotateCcw, AlertTriangle, Code2, ScrollText } from 'lucide-react';
 import SiteConfigModal from './SiteConfigModal';
+import ProjectManifestCard from './ProjectManifestCard';
 import { siteProcesses } from '../lib/sites';
 
 export const ConfigStaleBadge = () => {
@@ -30,7 +31,7 @@ const GroupBar = () => {
           <span className="text-[12px] font-bold mr-2">{group}</span>
           <button type="button" className="btn-ghost p-1.5 text-accent" title={t('groupStart')} onClick={() => startGroup(group)}><Play size={12} /></button>
           <button type="button" className="btn-ghost p-1.5" title={t('groupRestart')} onClick={() => restartGroup(group)}><RotateCcw size={12} /></button>
-          <button type="button" className="btn-ghost p-1.5 text-danger" title={t('groupStop')} onClick={() => stopGroup(group)}><Square size={12} /></button>
+          <button type="button" className="btn-ghost p-1.5" title={t('groupStop')} aria-label={t('groupStop')} onClick={() => stopGroup(group)}><Square size={12} /></button>
         </div>
       ))}
     </div>
@@ -148,23 +149,12 @@ const PageSites = () => {
           {!isCreating && (
             <>
               <button
+                type="button"
                 className="btn-ghost flex items-center gap-2 border border-border text-[12px] py-1.5 px-3"
-                onClick={async () => {
-                  const { apacheVersions, settings, showToast } = useStore.getState();
-                  const activeApache = apacheVersions.find(v => v.active && v.installed);
-                  if (!activeApache) { showToast(t('noActiveApacheSites'), 'warn'); return; }
-                  const vhostsPath = `${settings.devStackDir}/bin/apache/apache-${activeApache.version}/conf/extra/httpd-vhosts.conf`;
-
-                  const { invoke } = await import('@tauri-apps/api/core');
-                  invoke('open_file_default', {
-                    path: vhostsPath.replace(/\//g, '\\'),
-                    editor: 'notepad.exe',
-                    admin: false
-                  }).catch(() => showToast(t('vhostsNotFound'), 'danger'));
-                  showToast(t('openingVhosts'), 'info');
-                }}
+                title={t('rescanProjectsHint')}
+                onClick={async () => { await scanSites(); showToast(t('projectsRescanned'), 'ok'); }}
               >
-                {t('openVhostsFile')}
+                <RotateCcw size={13} /> {t('rescanProjects')}
               </button>
               <button
                 className="btn-primary py-1.5 px-3 text-[12px]"
@@ -180,7 +170,7 @@ const PageSites = () => {
       <div className="flex-1 overflow-y-auto p-5 px-6">
         <GroupBar />
         <div className="bg-surface border border-border rounded-xl overflow-hidden">
-          <div className="px-4.5 py-3.5 border-b border-border grid grid-cols-[2fr_90px_150px_2fr_70px_150px] gap-3 text-[11px] text-muted font-bold tracking-widest uppercase bg-surface">
+          <div className="px-4.5 py-3.5 border-b border-border grid grid-cols-[2fr_90px_150px_2fr_70px_auto] gap-3 text-[11px] text-muted font-bold tracking-widest uppercase bg-surface">
             <span>{t('domain')}</span>
             <span>{t('siteType')}</span>
             <span>PHP</span>
@@ -195,7 +185,7 @@ const PageSites = () => {
               const managed = !!cfg?.managed;
               const running = runningCount(site);
               return (
-                <div key={site.id} className="service-row grid grid-cols-[2fr_90px_150px_2fr_70px_150px] gap-3 items-center">
+                <div key={site.id} className="service-row grid grid-cols-[2fr_90px_150px_2fr_70px_auto] gap-3 items-center">
                   <div className="min-w-0">
                     {managed ? (
                       <button
@@ -242,10 +232,36 @@ const PageSites = () => {
                         <Link size={14} />
                       </button>
                     )}
-                    <button className="btn-ghost p-1.5" title={t('siteSettings')} onClick={() => setEditing(site)}>
+                    {managed && siteProcesses(cfg).length > 0 && (running > 0 ? (
+                      <button type="button" className="btn-ghost p-1.5" title={t('stopSiteProcesses')} aria-label={t('stopSiteProcesses')} onClick={() => useStore.getState().stopSiteProcesses(site)}>
+                        <Square size={14} />
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        className="btn-ghost p-1.5 text-accent"
+                        title={t('startSiteProcesses')}
+                        aria-label={t('startSiteProcesses')}
+                        onClick={async () => {
+                          const failed = await useStore.getState().startSiteProcesses(site);
+                          if (failed.length) showToast(t('siteProcessesFailed', { failed: failed.join(', ') }), 'danger');
+                        }}
+                      >
+                        <Play size={14} />
+                      </button>
+                    ))}
+                    <button type="button" className="btn-ghost p-1.5" title={t('siteSettings')} aria-label={t('siteSettings')} onClick={() => setEditing(site)}>
                       <Settings2 size={14} />
                     </button>
-                    <button className="btn-ghost p-1.5" title={t('openTerminal')} onClick={() => useStore.getState().openTerminal(site.path)}>
+                    <button type="button" className="btn-ghost p-1.5" title={t('openInEditor')} aria-label={t('openInEditor')} onClick={() => useStore.getState().openInEditor(site.path)}>
+                      <Code2 size={14} />
+                    </button>
+                    {managed && (
+                      <button type="button" className="btn-ghost p-1.5" title={t('projectLogs')} aria-label={t('projectLogs')} onClick={() => useStore.getState().openProjectLogs(site.key)}>
+                        <ScrollText size={14} />
+                      </button>
+                    )}
+                    <button type="button" className="btn-ghost p-1.5" title={t('openTerminal')} aria-label={t('openTerminal')} onClick={() => useStore.getState().openTerminal(site.path)}>
                       <Terminal size={14} />
                     </button>
                     <button className="btn-ghost p-1.5" title={t('openFolder')} onClick={() => useStore.getState().openExplorer(site.path)}>
@@ -296,6 +312,10 @@ const PageSites = () => {
               <div className="p-10 text-center text-muted italic">{t('noHosts')}</div>
             )}
           </div>
+        </div>
+        {/* Team setup: import a teammate's devstack.json or export these projects. */}
+        <div className="mt-5">
+          <ProjectManifestCard />
         </div>
       </div>
 

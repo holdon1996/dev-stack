@@ -7,7 +7,8 @@ import { getLogDir, toWinPath } from '../lib/paths';
 const ProjectLogs = () => {
   const { sites, siteConfigs, t } = useStore();
   const managed = sites.filter(s => siteConfigs[s.key]?.managed);
-  const [siteKey, setSiteKey] = useState(managed[0]?.key || '');
+  // Opened from a project row: that project; otherwise the first one.
+  const [siteKey, setSiteKey] = useState(() => useStore.getState().projectLogSite || managed[0]?.key || '');
   const [files, setFiles] = useState([]);
   const [file, setFile] = useState('');
   const [content, setContent] = useState('');

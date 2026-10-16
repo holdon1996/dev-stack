@@ -62,6 +62,48 @@ export const createGuideSlice = (set, get) => ({
         }
     },
 
+    /**
+     * New machine in one click: installs whichever of Apache, PHP and MySQL is missing, one
+     * after another (each install activates itself when it is the first), then starts Apache
+     * and MySQL. Stops at the first failure and points to that page.
+     */
+    installRecommendedStack: async () => {
+        const { t, showToast } = get();
+        const newest = (list) => [...list].filter(v => v.downloadUrl)
+            .sort((a, b) => b.version.localeCompare(a.version, undefined, { numeric: true }))[0]?.version;
+        // PHP 8.4: current and widely supported by Laravel / Symfony; else the newest 8.x.
+        const php = get().phpVersions.filter(v => v.downloadUrl && v.threadSafe !== false);
+        const steps = [
+            !get().apacheVersions.some(v => v.installed)
+                && { name: 'Apache', page: 'apache', version: newest(get().apacheVersions), install: (v) => get().installApacheVersion(v), list: () => get().apacheVersions },
+            !get().phpVersions.some(v => v.installed)
+                && { name: 'PHP', page: 'php', version: newest(php.filter(v => v.version.startsWith('8.4.'))) || newest(php.filter(v => v.version.startsWith('8.'))), install: (v) => get().installPhpVersion(v), list: () => get().phpVersions },
+            !get().mysqlVersions.some(v => v.installed)
+                && { name: 'MySQL', page: 'database', version: newest(get().mysqlVersions), install: (v) => get().installMysqlVersion(v), list: () => get().mysqlVersions },
+        ].filter(Boolean);
+
+        for (const [i, step] of steps.entries()) {
+            const label = `${step.name} ${step.version || ''}`.trim();
+            const toPage = { action: { label: t('guideOpenPage'), page: step.page }, key: 'stack' };
+            if (!step.version) {
+                showToast(t('stackInstallFailed', { name: label }), 'danger', toPage);
+                return false;
+            }
+            showToast(t('stackInstalling', { name: label, step: i + 1, total: steps.length }), 'info', { key: 'stack' });
+            await step.install(step.version);
+            if (!step.list().some(v => v.version === step.version && v.installed)) {
+                showToast(t('stackInstallFailed', { name: label }), 'danger', toPage);
+                return false;
+            }
+        }
+        for (const type of ['web', 'db']) {
+            const svc = get().services.find(s => s.type === type);
+            if (svc && svc.status !== 'running') await get().toggleService(svc.id);
+        }
+        showToast(t('stackReady'), 'ok', { key: 'stack' });
+        return true;
+    },
+
     /** Runs the "Fix" button of a checklist row, then re-checks. */
     runGuideFix: async (fix) => {
         if (!fix) return;
@@ -84,6 +126,9 @@ export const createGuideSlice = (set, get) => ({
                     const svc = get().services.find(s => s.type === type);
                     if (svc && svc.status !== 'running') await get().toggleService(svc.id);
                 }
+                break;
+            case 'installStack':
+                await get().installRecommendedStack();
                 break;
             case 'installCa':
                 await get().ensureMkcertCa();

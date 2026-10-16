@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useStore } from '../store';
 import {
   Database, Trash2, Server, Wrench,
-  Check, Download, Loader, RefreshCw, Plus, Link as LinkIcon, Edit2, Terminal
+  Check, Download, Loader, RefreshCw, Plus, Link as LinkIcon, Edit2, Terminal, Copy
 } from 'lucide-react';
 import { ask } from '@tauri-apps/plugin-dialog';
 import DatabaseTools from './DatabaseTools';
@@ -133,6 +133,24 @@ const PageDatabase = () => {
                 </span>
               </div>
               <div className="flex items-end justify-end border-l border-accent/10 pl-4 gap-2">
+                <button
+                  type="button"
+                  className="btn-ghost py-1.5 px-3 flex items-center gap-1.5 text-[11px] h-fit border border-border"
+                  title={t('copyDbEnvHint')}
+                  onClick={async () => {
+                    // The block a Laravel / PHP project's .env needs to reach this MySQL.
+                    const port = activeSvc?.port || activeV?.port || 3306;
+                    const env = ['DB_CONNECTION=mysql', 'DB_HOST=127.0.0.1', `DB_PORT=${port}`, 'DB_USERNAME=root', 'DB_PASSWORD=', ''].join('\n');
+                    try {
+                      await navigator.clipboard.writeText(env);
+                      showToast(t('copyDbEnvDone'), 'ok');
+                    } catch (e) {
+                      showToast(`${e}`, 'danger');
+                    }
+                  }}
+                >
+                  <Copy size={12} /> {t('copyDbEnv')}
+                </button>
                 {activeSvc?.status !== 'running' && (
                   <span className="text-[11px] text-warn font-bold flex items-center gap-1 mr-2">
                     {t('notRunningWarning')}
@@ -255,15 +273,10 @@ const PageDatabase = () => {
                       {v.installed && (
                         <div
                           className={`flex items-center gap-1.5 mt-2 px-2 py-0.5 w-fit border rounded-md transition-all group/port ${v.active ? 'bg-accent/5 border-accent/20 cursor-pointer hover:bg-accent/10 hover:border-accent/40' : 'bg-surface border-border opacity-50 cursor-not-allowed'}`}
-                          title={v.active ? t('clickToChangePort') : t('onlyActivePortChangable')}
+                          title={v.active ? t('changePortsOnServices') : t('onlyActivePortChangable')}
                           onClick={() => {
-                            if (!v.active) return;
-                            const currentPort = settings.portMySQL || 3306;
-                            const p = window.prompt(t('enterNewPort', { version: v.version }), currentPort);
-                            if (p && !isNaN(p)) {
-                              const mysqlSvc = useStore.getState().services.find(s => s.type === 'db');
-                              if (mysqlSvc) useStore.getState().updateServicePort(mysqlSvc.id, parseInt(p));
-                            }
+                            // Ports are changed (validated, applied) on the Services row.
+                            if (v.active) useStore.getState().setActivePage('services');
                           }}
                         >
                           <span className="text-[11px] font-bold font-mono text-accent">PORT: {v.active ? (settings.portMySQL || 3306) : 3306}</span>

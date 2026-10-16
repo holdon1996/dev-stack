@@ -34,7 +34,8 @@ export const createUiSlice = (set, get) => ({
         if (prev === 'logs' && page !== 'logs') {
             get().stopStreamingLogs?.();
         }
-        set({ activePage: page });
+        // A sidebar visit to Logs opens the service logs, not the last project's.
+        set({ activePage: page, projectLogSite: '' });
     },
 
     /**
@@ -59,6 +60,25 @@ export const createUiSlice = (set, get) => ({
         toastTimer = setTimeout(() => {
             set({ toast: { show: false, msg: '', type: 'ok' } });
         }, type === 'danger' || action ? 9000 : 5000);
+    },
+
+    /** Project whose logs the Logs page opens with (set by the Logs button on a project row). */
+    projectLogSite: '',
+    openProjectLogs: (siteKey) => set({ projectLogSite: siteKey, activePage: 'logs' }),
+
+    /** Opens a project folder in the editor from Settings (VS Code, PhpStorm, ...). */
+    openInEditor: async (path) => {
+        const { settings, t, showToast } = get();
+        if (!settings.editorPath) {
+            showToast(t('editorNotSet'), 'info', { action: { label: t('settings'), page: 'settings' } });
+            return;
+        }
+        try {
+            const { invoke } = await import('@tauri-apps/api/core');
+            await invoke('open_file_default', { path: path.replace(/\//g, '\\'), editor: settings.editorPath, admin: false });
+        } catch (e) {
+            showToast(t('editorOpenFailed', { error: `${e}` }), 'danger', { action: { label: t('settings'), page: 'settings' } });
+        }
     },
 
     dismissToast: () => {

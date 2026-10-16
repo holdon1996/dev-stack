@@ -13,7 +13,6 @@ const Sidebar = () => {
 
   const navItems = [
     { id: 'services', label: t('services'), icon: Layout },
-    { id: 'guide', label: t('guide'), icon: LifeBuoy },
     { id: 'sites', label: t('virtualHosts'), icon: Globe },
     { id: 'domains', label: t('domains'), icon: Globe2 },
     { id: 'apache', label: t('apache'), icon: Server },
@@ -24,6 +23,22 @@ const Sidebar = () => {
     { id: 'tunnels', label: t('tunnels'), icon: Radio },
     { id: 'logs', label: t('logs'), icon: FileText },
   ];
+  // Used now and then: below the separator, with the first-run banner linking to the Guide.
+  const bottomItems = [
+    { id: 'quickconfig', label: t('quickConfig'), icon: FileCode },
+    { id: 'guide', label: t('guide'), icon: LifeBuoy },
+    { id: 'settings', label: t('settings'), icon: Settings },
+  ];
+  const NavItem = ({ item }) => {
+    const Icon = item.icon;
+    const active = activePage === item.id;
+    return (
+      <button type="button" onClick={() => setActivePage(item.id)} aria-current={active ? 'page' : undefined} className={`nav-item w-full text-left ${active ? 'active' : ''}`}>
+        <Icon size={16} />
+        {item.label}
+      </button>
+    );
+  };
 
   // Redundant polling removed. Handled by global hooks in App.jsx.
 
@@ -40,37 +55,11 @@ const Sidebar = () => {
       </div>
 
       <nav className="flex flex-col gap-0.5 flex-1 min-h-0 overflow-y-auto overflow-x-hidden pr-1">
-        {navItems.map((item) => {
-          const Icon = item.icon;
-          return (
-            <div
-              key={item.id}
-              onClick={() => setActivePage(item.id)}
-              className={`nav-item ${activePage === item.id ? 'active' : ''}`}
-            >
-              <Icon size={16} />
-              {item.label}
-            </div>
-          );
-        })}
+        {navItems.map(item => <NavItem key={item.id} item={item} />)}
 
         <div className="border-t border-[#1a1c22] my-2.5"></div>
 
-        <div
-          onClick={() => setActivePage('quickconfig')}
-          className={`nav-item ${activePage === 'quickconfig' ? 'active' : ''}`}
-        >
-          <FileCode size={16} />
-          {t('quickConfig')}
-        </div>
-
-        <div
-          onClick={() => setActivePage('settings')}
-          className={`nav-item ${activePage === 'settings' ? 'active' : ''}`}
-        >
-          <Settings size={16} />
-          {t('settings')}
-        </div>
+        {bottomItems.map(item => <NavItem key={item.id} item={item} />)}
       </nav>
 
       {/* System Status Bar */}

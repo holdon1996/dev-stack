@@ -8,7 +8,7 @@ const PageLogs = () => {
   const scrollRef = useRef(null);
   // Follow new lines only while the view is at the bottom, so older lines can be read.
   const followRef = useRef(true);
-  const [projectMode, setProjectMode] = useState(false);
+  const [projectMode, setProjectMode] = useState(() => !!useStore.getState().projectLogSite);
 
   useEffect(() => {
     // Ensure streaming setup when landing on logs page

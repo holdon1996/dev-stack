@@ -33,10 +33,14 @@ const Snippet = ({ label, value, copied, onCopy }) => (
 );
 
 const PageMailServer = () => {
-  const { settings, updateSetting, updateSettings, showToast, checkServicesRunning } = useStore();
+  const { settings, updateSetting, updateSettings, showToast, toggleService } = useStore();
+  // Running state comes from the shared service poll (no own port polling), and Start/Stop
+  // go through toggleService like the Services row: port-owner check, crash detection, logs.
+  const mailSvc = useStore(s => s.services.find(x => x.type === 'mail'));
+  const running = mailSvc?.status === 'running';
+  const transitioning = mailSvc?.status === 'starting' || mailSvc?.status === 'stopping';
   const [release, setRelease] = React.useState(MAILPIT_FALLBACK);
   const [installed, setInstalled] = React.useState(false);
-  const [running, setRunning] = React.useState(false);
   const [installing, setInstalling] = React.useState(false);
   const [progress, setProgress] = React.useState({ pct: 0, downloaded: 0, total: 0 });
   const [copiedKey, setCopiedKey] = React.useState('');
@@ -53,20 +57,13 @@ const PageMailServer = () => {
 
   const refreshStatus = React.useCallback(async () => {
     try {
-      const exists = await invoke('path_exists', { path: mailpitExe });
-      const [smtpBusy, uiBusy] = await invoke('check_ports_status', { ports: [smtpPort, uiPort] });
-      setInstalled(!!exists);
-      setRunning(!!exists && smtpBusy && uiBusy);
+      setInstalled(!!(await invoke('path_exists', { path: mailpitExe })));
     } catch (e) {
       console.error('refresh mail status failed:', e);
     }
-  }, [mailpitExe, smtpPort, uiPort]);
+  }, [mailpitExe]);
 
-  React.useEffect(() => {
-    refreshStatus();
-    const timer = window.setInterval(refreshStatus, 3000);
-    return () => window.clearInterval(timer);
-  }, [refreshStatus]);
+  React.useEffect(() => { refreshStatus(); }, [refreshStatus]);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -106,11 +103,12 @@ const PageMailServer = () => {
         expectedSizeMb: null,
       });
 
+      // Keep the user's host and ports: only fill in defaults that were never set.
       updateSettings({
         mailProvider: 'mailpit',
-        mailHost: '127.0.0.1',
-        mailSmtpPort: 1025,
-        mailUiPort: 8025,
+        mailHost: settings.mailHost || '127.0.0.1',
+        mailSmtpPort: settings.mailSmtpPort || 1025,
+        mailUiPort: settings.mailUiPort || 8025,
         mailpitVersion: release.version,
       });
       showToast(`Mailpit ${release.version} installed`, 'ok');
@@ -124,42 +122,16 @@ const PageMailServer = () => {
     }
   };
 
-  const startMailpit = async () => {
+  const startMailpit = () => {
     if (!installed) {
       showToast('Hãy cài Mailpit trước', 'warn');
       return;
     }
-    try {
-      const ok = await invoke('start_detached_process', {
-        executable: mailpitExe,
-        args: [`--smtp=${host}:${smtpPort}`, `--listen=${host}:${uiPort}`],
-      });
-      if (!ok) throw new Error('process did not start');
-      showToast('Mailpit đang chạy', 'ok');
-      window.setTimeout(async () => {
-        await refreshStatus();
-        await checkServicesRunning();
-      }, 300);
-    } catch (e) {
-      console.error('startMailpit failed:', e);
-      showToast(`Không start được Mailpit: ${e}`, 'danger');
-    }
+    if (mailSvc) toggleService(mailSvc.id, 'start');
   };
 
-  const stopMailpit = async () => {
-    try {
-      await invoke('kill_process_by_name_exact', { name: 'mailpit.exe' });
-      showToast('Đã dừng Mailpit', 'warn');
-      await refreshStatus();
-      await checkServicesRunning();
-      window.setTimeout(async () => {
-        await refreshStatus();
-        await checkServicesRunning();
-      }, 350);
-    } catch (e) {
-      console.error('stopMailpit failed:', e);
-      showToast(`Không dừng được Mailpit: ${e}`, 'danger');
-    }
+  const stopMailpit = () => {
+    if (mailSvc) toggleService(mailSvc.id, 'stop');
   };
 
   const openExternal = async (target) => {
@@ -184,7 +156,7 @@ const PageMailServer = () => {
   const selectProvider = (id) => {
     updateSetting('mailProvider', id);
     if (id === 'mailpit') {
-      updateSettings({ mailHost: '127.0.0.1', mailSmtpPort: 1025, mailUiPort: 8025 });
+      updateSettings({ mailHost: settings.mailHost || '127.0.0.1', mailSmtpPort: settings.mailSmtpPort || 1025, mailUiPort: settings.mailUiPort || 8025 });
     }
   };
 
@@ -237,7 +209,7 @@ const PageMailServer = () => {
                 <button className="btn-ghost flex items-center gap-2" onClick={installMailpit} disabled={installing}>
                   {installing ? <Loader size={14} className="animate-spin" /> : <Download size={14} />} {installed ? 'Cập nhật' : 'Cài đặt'}
                 </button>
-                <button className="btn-ghost flex items-center gap-2" onClick={running ? stopMailpit : startMailpit} disabled={installing}>
+                <button type="button" className="btn-ghost flex items-center gap-2" onClick={running ? stopMailpit : startMailpit} disabled={installing || transitioning}>
                   {running ? <Square size={13} /> : <Play size={13} />} {running ? 'Stop' : 'Start'}
                 </button>
                 <button className="btn-ghost flex items-center gap-2" onClick={() => openExternal(inboxUrl)}>

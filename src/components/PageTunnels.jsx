@@ -250,7 +250,7 @@ const PageTunnels = () => {
                 }
               </button>
             ) : tunnelStatus === 'running' ? (
-              <button className="btn-danger flex items-center gap-2" onClick={stopTunnel}>
+              <button type="button" className="btn-ghost flex items-center gap-2" onClick={stopTunnel}>
                 <Square size={12} /> {t('stopTunnel')}
               </button>
             ) : (

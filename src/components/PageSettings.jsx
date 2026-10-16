@@ -358,16 +358,21 @@ const PageSettings = () => {
         {/* Ports */}
         <div className="bg-surface border border-border rounded-xl p-5 flex flex-col gap-4">
           <div className="text-[11px] font-bold text-muted tracking-[0.08em] uppercase border-b border-border pb-3">{t('ports')}</div>
+          {/* Ports are changed in one place, the Services rows, which validate and apply them
+              (vhosts, my.ini, restart). Typing here used to change the next start silently. */}
           <div className="grid grid-cols-2 gap-3">
             <div className="flex flex-col gap-1.5">
-              <label className="text-[13px] font-semibold text-textDim">{t('httpPort')}</label>
-              <input type="number" className="input-field" value={settings.port80} onChange={(e) => updateSetting('port80', e.target.value)} />
+              <label htmlFor="settings-port80" className="text-[13px] font-semibold text-textDim">{t('httpPort')}</label>
+              <input id="settings-port80" className="input-field" value={settings.port80 || 80} readOnly />
             </div>
             <div className="flex flex-col gap-1.5">
-              <label className="text-[13px] font-semibold text-textDim">{t('mysqlPort')}</label>
-              <input type="number" className="input-field" value={settings.portMySQL} onChange={(e) => updateSetting('portMySQL', e.target.value)} />
+              <label htmlFor="settings-portmysql" className="text-[13px] font-semibold text-textDim">{t('mysqlPort')}</label>
+              <input id="settings-portmysql" className="input-field" value={settings.portMySQL || 3306} readOnly />
             </div>
           </div>
+          <button type="button" className="text-[12px] text-accent hover:underline self-start" onClick={() => useStore.getState().setActivePage('services')}>
+            {t('changePortsOnServices')}
+          </button>
           <button className="btn-primary self-start mt-2" onClick={handleApplyChanges}>
             {t('saveChanges')}
           </button>

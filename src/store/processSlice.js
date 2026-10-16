@@ -57,9 +57,13 @@ export const createProcessSlice = (set, get) => ({
     },
 
     /** PATH entries for DevStack tools, DevStack first so they win over separate installs. */
-    devstackPathPrefix: (phpVersion) => {
+    /** `nodeVersion`: a site's pinned Node (its processes and terminal); else the active one. */
+    devstackPathPrefix: (phpVersion, nodeVersion) => {
         const st = get();
         const devDir = getDevDir(st);
+        const node = nodeVersion && (st.nodeVersions || []).some(v => v.version === nodeVersion)
+            ? `${devDir}/bin/node/node-v${nodeVersion}`
+            : `${devDir}/bin/node/current`;
         // Same PHP the site's FastCGI pool runs on (including the same-minor fallback).
         const php = st._sitePhp({ phpVersion });
         const mysql = st.mysqlVersions.find(v => v.active && v.installed);
@@ -69,7 +73,7 @@ export const createProcessSlice = (set, get) => ({
             st.redisDir,
             `${getBinDir(st)}/tools`,
             `${getBinDir(st)}/tunnels`,
-            `${devDir}/bin/node/current`,
+            node,
         ].filter(Boolean).map(win).join(';');
     },
 
@@ -127,12 +131,26 @@ export const createProcessSlice = (set, get) => ({
             command: proc.command,
             cwd: proc.cwd ? `${site.path}/${proc.cwd}` : site.path,
             env: get().siteEnv(site),
-            pathPrefix: get().devstackPathPrefix(cfg.phpVersion),
+            pathPrefix: get().devstackPathPrefix(cfg.phpVersion, cfg.nodeVersion),
             restart: !!proc.autoRestart,
         });
     },
 
     stopSiteProcess: (site, proc) => get().stopProcess(get().siteProcessId(site, proc)),
+
+    /** Starts every process of a project that is not running; returns the names that failed. */
+    startSiteProcesses: async (site) => {
+        const failed = [];
+        for (const proc of siteProcesses(get().siteConfigs[site.key] || {})) {
+            if (get().procs[get().siteProcessId(site, proc)]?.running) continue;
+            if (!(await get().startSiteProcess(site, proc))) failed.push(`${site.key}:${proc.name}`);
+        }
+        return failed;
+    },
+
+    stopSiteProcesses: async (site) => {
+        await Promise.all(siteProcesses(get().siteConfigs[site.key] || {}).map(proc => get().stopSiteProcess(site, proc)));
+    },
 
     groupNames: () => [...new Set(Object.values(get().siteConfigs).filter(c => c.managed && c.group).map(c => c.group))].sort(),
 
@@ -142,15 +160,18 @@ export const createProcessSlice = (set, get) => ({
 
     /** Starts Apache (if needed) then each project's processes in group order. */
     startGroup: async (group) => {
-        const web = get().services.find(s => s.type === 'web');
-        if (web && web.status !== 'running') await get().toggleService(web.id, 'start');
+        // The group's sites need Apache and, almost always, the database.
+        for (const type of ['web', 'db']) {
+            const svc = get().services.find(s => s.type === type);
+            if (svc && svc.status !== 'running' && !svc.useExternal && (await get()._serviceInstalled(svc))) await get().toggleService(svc.id, 'start');
+        }
+        const failed = [];
         for (const site of get()._groupSites(group)) {
-            for (const proc of siteProcesses(get().siteConfigs[site.key])) {
-                if (!get().procs[get().siteProcessId(site, proc)]?.running) await get().startSiteProcess(site, proc);
-            }
+            failed.push(...(await get().startSiteProcesses(site)));
             await new Promise(r => setTimeout(r, 800));
         }
-        get().showToast(get().t('groupStarted', { group }), 'ok');
+        if (failed.length) get().showToast(get().t('groupStartFailed', { group, failed: failed.join(', ') }), 'danger');
+        else get().showToast(get().t('groupStarted', { group }), 'ok');
     },
 
     stopGroup: async (group) => {

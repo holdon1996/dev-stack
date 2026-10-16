@@ -23,9 +23,10 @@ export function evaluateChecks(f) {
         { id: 'admin', ok: f.elevated, fix: { action: 'relaunchAdmin' } },
         { id: 'installPath', ok: !pathProblem, optional: true, detailKey: pathProblem },
         { id: 'vcRuntime', ok: f.vcRuntime, fix: { url: VC_REDIST_URL } },
-        { id: 'apache', ok: f.apacheActive, fix: { page: 'apache' } },
-        { id: 'php', ok: f.phpActive, fix: { page: 'php' } },
-        { id: 'mysql', ok: f.mysqlActive, fix: { page: 'database' } },
+        // One "Fix" installs whatever of Apache / PHP / MySQL is missing (new machine).
+        { id: 'apache', ok: f.apacheActive, fix: { action: 'installStack' } },
+        { id: 'php', ok: f.phpActive, fix: { action: 'installStack' } },
+        { id: 'mysql', ok: f.mysqlActive, fix: { action: 'installStack' } },
         { id: 'ports', ok: !(f.foreignPorts || []).length, params: { ports: (f.foreignPorts || []).join(', ') }, fix: { page: 'services' } },
         // A developer may stop MySQL on purpose: a reminder, not a setup problem.
         { id: 'running', ok: f.apacheRunning && f.mysqlRunning, optional: true, fix: { action: 'startCore' } },

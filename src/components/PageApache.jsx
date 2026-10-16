@@ -298,56 +298,20 @@ const PageApache = () => {
               </div>
               <div className="flex flex-col gap-1">
                 <span className="text-muted text-[11px] uppercase font-bold">{t('phpModule')}</span>
-                <span className="font-mono text-info">
-                  {activePhp ? `php${activePhp.version.split('.')[0]}apache2_4.dll` : t('notConfigured')}
+                {/* Sites run on per-site FastCGI pools by default; the module only serves mod_php sites. */}
+                <span className="font-mono text-info">{t('phpRunsFcgi')}</span>
+                <span className="font-mono text-muted text-[11px]">
+                  mod_php: {activePhp ? `php${activePhp.version.split('.')[0]}apache2_4.dll` : t('notConfigured')}
                 </span>
               </div>
               <div className="flex flex-col gap-1">
                 <span className="text-muted text-[11px] uppercase font-bold">{t('port')}</span>
-                <span className="font-mono text-textDim">80</span>
+                <span className="font-mono text-textDim">{settings.port80 || 80}</span>
               </div>
             </div>
           </div>
         )}
 
-        {/* Quick links */}
-        <div className="grid grid-cols-2 gap-4">
-          <div className="bg-surface border border-border rounded-xl p-5">
-            <div className="flex items-center gap-3 mb-3">
-              <div className="w-8 h-8 rounded-lg bg-info/10 flex items-center justify-center text-info">
-                <Globe size={18} />
-              </div>
-              <div className="text-[13px] font-bold uppercase tracking-wider">{t('publicAccess')}</div>
-            </div>
-            <p className="text-[12px] text-muted mb-4">
-              {t('publicAccessDesc')}
-            </p>
-            <button
-              className="btn-ghost w-full py-2 text-[12px]"
-              onClick={() => useStore.setState({ activePage: 'tunnels' })}
-            >
-              {t('openTunnelsPage')}
-            </button>
-          </div>
-
-          <div className="bg-surface border border-border rounded-xl p-5">
-            <div className="flex items-center gap-3 mb-3">
-              <div className="w-8 h-8 rounded-lg bg-accent/10 flex items-center justify-center text-accent">
-                <FileCode size={18} />
-              </div>
-              <div className="text-[13px] font-bold uppercase tracking-wider">{t('vhostsTitle')}</div>
-            </div>
-            <p className="text-[12px] text-muted mb-4">
-              {t('virtualHostsDesc')}
-            </p>
-            <button
-              className="btn-ghost w-full py-2 text-[12px]"
-              onClick={() => useStore.setState({ activePage: 'sites' })}
-            >
-              {t('manageLocalDomains')}
-            </button>
-          </div>
-        </div>
 
       </div>
     </div>

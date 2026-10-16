@@ -762,7 +762,7 @@ export const createServiceSlice = (set, get) => ({
             await invoke('open_devstack_terminal', {
                 shell,
                 cwd: targetPath,
-                pathPrefix: get().devstackPathPrefix(cfg?.phpVersion),
+                pathPrefix: get().devstackPathPrefix(cfg?.phpVersion, cfg?.nodeVersion),
                 env: site ? get().siteEnv(site) : get().devstackCaEnv(),
             });
         } catch (e) {

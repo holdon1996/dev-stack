@@ -9,7 +9,7 @@ export const MANIFEST_VERSION = 1;
 // Per-site fields shared through the manifest, in the order they are written.
 const SHARED_FIELDS = [
     'type', 'docRoot', 'proxyPort', 'nginxRewrite', 'domain', 'aliases', 'ssl', 'httpsRedirect',
-    'phpMode', 'phpVersion', 'fcgiProcesses', 'order', 'processes', 'env',
+    'phpMode', 'phpVersion', 'nodeVersion', 'fcgiProcesses', 'order', 'processes', 'env',
 ];
 
 const pick = (cfg) => Object.fromEntries(SHARED_FIELDS.filter(f => cfg[f] !== undefined).map(f => [f, cfg[f]]));
