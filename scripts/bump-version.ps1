@@ -68,7 +68,9 @@ $packageJson = $packageJsonRegex.Replace(
 [System.IO.File]::WriteAllText($packageJsonPath, $packageJson, [System.Text.UTF8Encoding]::new($false))
 
 $cargoToml = Get-Content -LiteralPath $cargoTomlPath -Raw
-$cargoToml = [regex]::Replace($cargoToml, '(?m)^version\s*=\s*"[^"]+"$', "version = `"$Version`"", 1)
+# `(?=\r?$)`: with CRLF line endings `$` alone never matches before the `\r`, and the
+# version was silently left unchanged (v1.0.28).
+$cargoToml = [regex]::Replace($cargoToml, '(?m)^version\s*=\s*"[^"]+"(?=\r?$)', "version = `"$Version`"", 1)
 [System.IO.File]::WriteAllText($cargoTomlPath, $cargoToml, [System.Text.UTF8Encoding]::new($false))
 
 $tauriConf = Get-Content -LiteralPath $tauriConfPath -Raw
