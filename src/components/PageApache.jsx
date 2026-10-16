@@ -83,13 +83,14 @@ const PageApache = () => {
           <div className="flex items-center justify-between mb-3">
             <div>
               <div className="text-[11px] font-bold text-muted tracking-[0.08em] uppercase">{t('apacheVersionsTitle')}</div>
-              <div
+              <button
+                type="button"
                 className="text-[11px] text-muted font-mono mt-0.5 cursor-pointer hover:text-accent transition-colors flex items-center gap-1"
                 onClick={() => useStore.getState().openExplorer(`${settings.devStackDir}/bin/apache/`)}
                 title={t('openInExplorer')}
               >
                 📁 {settings.devStackDir}/bin/apache/
-              </div>
+              </button>
             </div>
             <div className="flex items-center gap-2">
               {activeApache && (
@@ -280,21 +281,24 @@ const PageApache = () => {
             <div className="grid grid-cols-2 gap-3 text-[12px]">
               <div className="flex flex-col gap-1">
                 <span className="text-muted text-[11px] uppercase font-bold">{t('documentRoot')}</span>
-                <span
-                  className="font-mono text-accent cursor-pointer hover:underline"
+                <button
+                  type="button"
+                  className="font-mono text-accent cursor-pointer hover:underline text-left break-all"
                   onClick={() => useStore.getState().openExplorer(settings.rootPath)}
+                  title={t('openInExplorer')}
                 >
                   {settings.rootPath}
-                </span>
+                </button>
               </div>
               <div className="flex flex-col gap-1">
                 <span className="text-muted text-[11px] uppercase font-bold">{t('configFile')}</span>
-                <span
-                  className="font-mono text-textDim cursor-pointer hover:text-accent transition-colors"
+                <button
+                  type="button"
+                  className="font-mono text-textDim cursor-pointer hover:text-accent transition-colors text-left break-all"
                   onClick={() => openConfigFile('httpd_conf')}
                 >
                   {settings.devStackDir}/bin/apache/apache-{activeApache.version}/conf/httpd.conf
-                </span>
+                </button>
               </div>
               <div className="flex flex-col gap-1">
                 <span className="text-muted text-[11px] uppercase font-bold">{t('phpModule')}</span>

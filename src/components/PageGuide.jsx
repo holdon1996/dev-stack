@@ -144,7 +144,10 @@ const PageGuide = () => {
 
   useEffect(() => { runGuideChecks(); }, []);
   useEffect(() => {
-    if (guideAnchor) document.getElementById(guideAnchor)?.scrollIntoView({ behavior: 'smooth' });
+    if (!guideAnchor) return;
+    document.getElementById(guideAnchor)?.scrollIntoView({ behavior: 'smooth' });
+    // Consumed: reopening the Guide starts at the top, and the same anchor scrolls again.
+    useStore.setState({ guideAnchor: '' });
   }, [guideAnchor]);
 
   return (

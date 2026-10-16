@@ -29,13 +29,17 @@ const PageSettings = () => {
     setLocalDevDir(settings.devStackDir);
   }, [settings.rootPath, settings.devStackDir]);
 
-  const Toggle = ({ active, onToggle }) => (
-    <div
+  const Toggle = ({ active, onToggle, label }) => (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={!!active}
+      aria-label={label}
       onClick={onToggle}
-      className={`w-10 h-[22px] ${active ? 'bg-accent' : 'bg-border'} rounded-[11px] cursor-pointer relative transition-colors duration-200`}
+      className={`w-10 h-[22px] shrink-0 p-0 ${active ? 'bg-accent' : 'bg-border'} rounded-[11px] cursor-pointer relative transition-colors duration-200`}
     >
-      <div className={`w-[18px] h-[18px] bg-white rounded-full absolute top-0.5 transition-all duration-200 ${active ? 'right-0.5' : 'left-0.5'}`}></div>
-    </div>
+      <span className={`block w-[18px] h-[18px] bg-white rounded-full absolute top-0.5 transition-all duration-200 ${active ? 'right-0.5' : 'left-0.5'}`}></span>
+    </button>
   );
 
   const handleBrowse = async (key) => {
@@ -225,7 +229,7 @@ const PageSettings = () => {
               <div className="text-[13px] font-semibold">{t('startOnBoot')}</div>
               <div className="text-[11px] text-muted">{t('startOnBootDesc')}</div>
             </div>
-            <Toggle active={settings.startOnBoot} onToggle={() => toggleSetting('startOnBoot')} />
+            <Toggle active={settings.startOnBoot} onToggle={() => toggleSetting('startOnBoot')} label={t('startOnBoot')} />
           </div>
 
           <div className="flex flex-col gap-1.5 border-t border-border pt-4">

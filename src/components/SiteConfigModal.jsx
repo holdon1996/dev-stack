@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { X, Wand2, Play, Square, Plus, Trash2, RefreshCw, Loader, ScrollText } from 'lucide-react';
 import { useStore } from '../store';
 import HelpTip from './HelpTip';
@@ -89,12 +89,16 @@ const SiteConfigModal = ({ site, onClose }) => {
   const [draft, setDraft] = useState(null);
   const [aliasText, setAliasText] = useState('');
   const [sslTouched, setSslTouched] = useState(!!saved?.managed);
+  // The config the modal opened with: the backdrop only closes while nothing was changed.
+  const initial = useRef(null);
 
   useEffect(() => {
     (async () => {
       const cfg = saved?.managed ? saved : await detectSiteConfig(site);
+      const aliases = (cfg.aliases || []).join(' ');
+      initial.current = { cfg, aliases };
       setDraft(cfg);
-      setAliasText((cfg.aliases || []).join(' '));
+      setAliasText(aliases);
     })();
   }, [site.key]);
 
@@ -128,6 +132,10 @@ const SiteConfigModal = ({ site, onClose }) => {
     update({ type: detected.type, docRoot: detected.docRoot, proxyPort: detected.proxyPort });
   };
 
+  const isDirty = () => !initial.current
+    || aliasText !== initial.current.aliases
+    || JSON.stringify(draft) !== JSON.stringify(initial.current.cfg);
+
   const save = async () => {
     const ok = await saveSiteConfig(site.key, {
       ...draft,
@@ -141,7 +149,7 @@ const SiteConfigModal = ({ site, onClose }) => {
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-6" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+    <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-6" onMouseDown={(e) => { if (e.target === e.currentTarget && !isDirty()) onClose(); }}>
       <div role="dialog" aria-modal="true" aria-labelledby="site-config-title" className="bg-surface border border-border rounded-xl w-full max-w-[780px] max-h-[88vh] flex flex-col shadow-2xl">
         <div className="px-5 py-4 border-b border-border flex items-center gap-3">
           <div className="flex-1 min-w-0">

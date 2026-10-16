@@ -106,15 +106,17 @@ const ServiceRow = ({ service }) => {
 
       <div className="flex-1 flex flex-col items-start gap-1 group/port relative">
         <div className="relative">
-          <span
+          <button
+            type="button"
             className={`tag tag-port cursor-pointer hover:bg-accent/20 hover:text-accent border border-transparent hover:border-accent/30 transition-all font-mono px-3 py-1 rounded-lg flex items-center gap-1
               ${isEditingPort ? 'opacity-0' : 'opacity-100'}`}
             onClick={() => { setTempPort(service.port); setIsEditingPort(true); }}
-            title={useStore.getState().t('clickToChangePortTooltip')}
+            title={t('clickToChangePortTooltip')}
+            aria-label={`${t('changePort')}: ${service.port || '—'}`}
           >
             <span className="text-[11px] opacity-40">:</span>
             {service.port || '—'}
-          </span>
+          </button>
 
           {isEditingPort && (
             <input

@@ -115,7 +115,7 @@ const PagePHP = () => {
               <h3 className="text-[14px] font-bold flex items-center gap-2">
                 <Download size={16} className="text-accent" /> {t('installPhpCustomVersion')}
               </h3>
-              <button onClick={() => setShowCustomInstall(false)} className="text-muted hover:text-white">
+              <button type="button" onClick={() => setShowCustomInstall(false)} className="text-muted hover:text-white" aria-label={t('closeCustomInstall')} title={t('close')}>
                 <X size={16} />
               </button>
             </div>
@@ -445,8 +445,11 @@ const PagePHP = () => {
               >
                 <span className="text-[12px] font-mono text-textDim">{ext}</span>
                 <button
-                  className="opacity-0 group-hover:opacity-100 text-muted hover:text-danger transition-all"
+                  type="button"
+                  className="opacity-0 group-hover:opacity-100 focus:opacity-100 text-muted hover:text-danger transition-all"
                   onClick={() => removeExtension(ext)}
+                  aria-label={t('removeExtensionLabel', { ext })}
+                  title={t('removeExtensionLabel', { ext })}
                 >
                   <X size={12} />
                 </button>
