@@ -125,6 +125,10 @@ export function validateSiteConfig(cfg) {
         const n = Number(cfg.fcgiProcesses);
         if (!Number.isInteger(n) || n < 1 || n > FCGI_MAX_PROCESSES) errors.push('siteErrFcgiProcesses');
     }
+    // A process is identified by `<site>:<name>`: two with one name would share it.
+    const names = (cfg.processes || []).map(p => `${p.name || ''}`.trim()).filter(Boolean);
+    if (new Set(names).size !== names.length) errors.push('siteErrProcessDuplicate');
+    if (cfg.type === 'proxy' && names.includes('vite')) errors.push('siteErrProcessVite');
     return errors;
 }
 

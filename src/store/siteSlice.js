@@ -394,7 +394,10 @@ export const createSiteSlice = (set, get) => ({
         if (!settings.mkcertCaInstalled) {
             const { ask } = await import('@tauri-apps/plugin-dialog');
             const ok = await ask(t('mkcertCaPrompt'), { title: 'DevStack', kind: 'info', okLabel: t('continueLabel'), cancelLabel: t('cancel') });
-            if (!ok) return false;
+            if (!ok) {
+                showToast(t('mkcertCaDeclined'), 'warn');
+                return false;
+            }
             await invoke('mkcert_install', { mkcertExe });
             get().updateSettings({ mkcertCaInstalled: true });
             await get().refreshCaBundle({ restart: false });

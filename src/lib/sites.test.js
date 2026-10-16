@@ -117,6 +117,12 @@ test('FastCGI is the default and every site gets its own port block', () => {
 test('validates hosts, conflicts and domain warnings', () => {
     assert.deepEqual(validateSiteConfig({ ...defaultSiteConfig('a'), domain: 'Bad Host' }), ['siteErrHost']);
     assert.deepEqual(validateSiteConfig({ ...defaultSiteConfig('a'), docRoot: '../etc' }), ['siteErrDocRoot']);
+    const proc = (name) => ({ name, command: 'npm run x' });
+    assert.deepEqual(validateSiteConfig({ ...defaultSiteConfig('a'), processes: [proc('queue'), proc(' queue ')] }), ['siteErrProcessDuplicate']);
+    assert.deepEqual(validateSiteConfig({ ...defaultSiteConfig('a'), processes: [proc('queue'), proc('worker')] }), []);
+    assert.deepEqual(validateSiteConfig({ ...defaultSiteConfig('a'), type: 'proxy', proxyPort: 5173, processes: [proc('vite')] }), ['siteErrProcessVite']);
+    // Only proxy sites have the built-in vite process.
+    assert.deepEqual(validateSiteConfig({ ...defaultSiteConfig('a'), processes: [proc('vite')] }), []);
     assert.deepEqual(validateSiteConfig({ ...defaultSiteConfig('a'), docRoot: 'public"\nInclude x' }), ['siteErrDocRoot']);
     assert.deepEqual(findHostConflicts([
         { key: 'a', cfg: { domain: 'x.test', aliases: [] } },
