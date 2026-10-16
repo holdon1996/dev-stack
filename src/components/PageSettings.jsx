@@ -105,7 +105,10 @@ const PageSettings = () => {
     updateSetting('devStackDir', localDevDir);
     showToast(t('rescanning'), 'info');
     const s = useStore.getState();
-    await Promise.all([s.scanInstalledApache(), s.scanInstalledPhp(), s.scanInstalledMysql(), s.scanInstalledNode(), s.resolveRedis(), s.scanSites()]);
+    // allSettled: one failing scan must not hide the others' results.
+    await Promise.allSettled([s.scanInstalledApache(), s.scanInstalledPhp(), s.scanInstalledMysql(), s.scanInstalledNode(), s.resolveRedis(), s.scanSites()]);
+    // A PHP copied into bin/php by hand gets its CA settings now, not at the next app start.
+    await s.ensurePhpCaConfig();
     showToast(t('installsRescanned'), 'ok');
   };
 
