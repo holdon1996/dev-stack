@@ -46,8 +46,21 @@ struct ImportProgress {
 
 /// Streams a `.sql` file into `database`. With `disable_fk`, `SET FOREIGN_KEY_CHECKS=0;`
 /// is prepended on the same line so mysql's "at line N" errors still match the file.
-#[tauri::command(async)]
-pub fn mysql_import(
+#[tauri::command]
+pub async fn mysql_import(
+    app: AppHandle,
+    mysql_exe: String,
+    port: u16,
+    database: String,
+    file: String,
+    disable_fk: bool,
+) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || mysql_import_blocking(app, mysql_exe, port, database, file, disable_fk))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+fn mysql_import_blocking(
     app: AppHandle,
     mysql_exe: String,
     port: u16,
@@ -102,8 +115,14 @@ pub fn mysql_import(
 }
 
 /// Dumps one or more databases (with CREATE DATABASE statements) to `dest`.
-#[tauri::command(async)]
-pub fn mysql_dump(mysqldump_exe: String, port: u16, databases: Vec<String>, dest: String) -> Result<String, String> {
+#[tauri::command]
+pub async fn mysql_dump(mysqldump_exe: String, port: u16, databases: Vec<String>, dest: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || mysql_dump_blocking(mysqldump_exe, port, databases, dest))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+fn mysql_dump_blocking(mysqldump_exe: String, port: u16, databases: Vec<String>, dest: String) -> Result<String, String> {
     if databases.is_empty() || databases.iter().any(|d| !is_valid_db_name(d)) {
         return Err("Select at least one valid database".into());
     }

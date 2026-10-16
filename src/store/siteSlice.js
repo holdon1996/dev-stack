@@ -203,20 +203,9 @@ export const createSiteSlice = (set, get) => ({
     /** `devstack.json` files one or two folder levels below www (e.g. a workspace folder next to the repos). */
     findProjectManifests: async () => {
         const { invoke } = await import('@tauri-apps/api/core');
-        const www = (get().settings.rootPath || '').replace(/[\\/]+$/, '');
+        const www = get().settings.rootPath || '';
         if (!www) return [];
-        const found = [];
-        const check = async (dir) => {
-            const file = win(`${dir}/${MANIFEST_FILE}`);
-            if (await invoke('path_exists', { path: file })) found.push(file);
-        };
-        for (const top of await invoke('list_subdirs', { path: win(www) }).catch(() => [])) {
-            await check(`${www}/${top}`);
-            for (const sub of await invoke('list_subdirs', { path: win(`${www}/${top}`) }).catch(() => [])) {
-                if (!['node_modules', 'vendor', '.git'].includes(sub)) await check(`${www}/${top}/${sub}`);
-            }
-        }
-        return found;
+        return invoke('find_project_manifests', { root: www }).catch(() => []);
     },
 
     /**

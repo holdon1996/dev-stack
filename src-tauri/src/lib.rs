@@ -1293,7 +1293,7 @@ async fn spawn_command_stream(
 }
 
 
-#[tauri::command]
+#[tauri::command(async)]
 fn path_exists(path: String) -> bool {
     std::path::Path::new(&path).exists()
 }
@@ -1301,7 +1301,7 @@ fn path_exists(path: String) -> bool {
 /// `redis-server.exe` under `<bin>/redis*` (the folder itself or one level down,
 /// as Windows zips usually nest a versioned folder). `bin/redis` wins, then the
 /// highest folder name (redis8 before redis5).
-#[tauri::command]
+#[tauri::command(async)]
 fn find_redis_server(bin_dir: String) -> Option<String> {
     let mut dirs: Vec<std::path::PathBuf> = fs::read_dir(&bin_dir).ok()?
         .flatten()
@@ -1329,7 +1329,7 @@ fn find_redis_server(bin_dir: String) -> Option<String> {
     None
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn create_dir(path: String) -> bool {
     std::fs::create_dir_all(&path).is_ok()
 }
@@ -1378,7 +1378,7 @@ fn disable_php_extension(ini_path: String, ext: String) -> bool {
     std::fs::write(&ini_path, updated).is_ok()
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn get_php_ini_extensions(ini_path: String) -> Result<Vec<String>, String> {
     let content = std::fs::read_to_string(&ini_path).map_err(|e| e.to_string())?;
     let re = regex::Regex::new(r"(?im)^\s*extension\s*=\s*([A-Za-z0-9_]+)\s*$").unwrap();
@@ -1590,7 +1590,7 @@ fn set_php_global_path(base_dir: String, php_dir: String) -> Result<(), String> 
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn list_subdirs(path: String) -> Vec<String> {
     let mut dirs = Vec::new();
     if let Ok(entries) = std::fs::read_dir(path) {
@@ -1603,6 +1603,42 @@ fn list_subdirs(path: String) -> Vec<String> {
         }
     }
     dirs
+}
+
+/// `devstack.json` files one or two folder levels below `root` (e.g. a workspace folder next to
+/// the repos), skipping node_modules, vendor and .git, as backslash paths.
+#[tauri::command(async)]
+fn find_project_manifests(root: String) -> Vec<String> {
+    let root = root.replace('/', "\\");
+    let root = root.trim_end_matches('\\');
+    if root.is_empty() {
+        return Vec::new();
+    }
+    let subdirs = |dir: &str| -> Vec<String> {
+        let Ok(entries) = fs::read_dir(dir) else { return Vec::new() };
+        entries
+            .flatten()
+            .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()))
+            .filter_map(|e| e.file_name().to_str().map(String::from))
+            .collect()
+    };
+    let mut found = Vec::new();
+    let mut check = |dir: &str| {
+        let file = format!("{dir}\\devstack.json");
+        if Path::new(&file).exists() {
+            found.push(file);
+        }
+    };
+    for top in subdirs(root) {
+        let top_dir = format!("{root}\\{top}");
+        check(&top_dir);
+        for sub in subdirs(&top_dir) {
+            if !["node_modules", "vendor", ".git"].contains(&sub.as_str()) {
+                check(&format!("{top_dir}\\{sub}"));
+            }
+        }
+    }
+    found
 }
 
 #[derive(Debug, Serialize)]
@@ -1890,7 +1926,7 @@ fn detect_active_node_version_internal(base_dir: &str) -> Result<Option<String>,
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn list_node_versions(base_dir: String) -> Result<Vec<NodeVersionState>, String> {
     let root = node_root_dir(&base_dir);
     fs::create_dir_all(&root).map_err(|e| e.to_string())?;
@@ -2177,7 +2213,7 @@ fn configure_apache_php(
     fs::write(apache_conf_path, updated_content).is_ok()
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn write_text_file(path: String, content: String) -> Result<(), String> {
     use std::fs;
     fs::write(path, content).map_err(|e| e.to_string())
@@ -2804,53 +2840,92 @@ async fn install_binary(
         emit_log("Download size: unknown (streaming...)");
     }
 
-    let mut body = res.bytes_stream();
-    let mut bytes = Vec::new();
-    let mut downloaded: u64 = 0;
-    // Progress at most every 100 ms: per 64 KB it was ~4,000 UI updates for a 250 MB MySQL zip.
-    let mut last_emit = std::time::Instant::now();
-    use futures_util::StreamExt;
-
-    while let Some(chunk) = body.next().await {
-        let chunk = chunk.map_err(|e| e.to_string())?;
-        bytes.extend_from_slice(&chunk);
-        downloaded += chunk.len() as u64;
-
-        if last_emit.elapsed() >= std::time::Duration::from_millis(100) {
-            last_emit = std::time::Instant::now();
-            let downloaded_mb = (downloaded as f64 / 1024.0 / 1024.0 * 100.0).round() / 100.0;
-
-            if total_size > 0 {
-                let pct = (downloaded as f64 / total_size as f64 * 100.0).min(99.0) as u32;
-                let total_mb = (total_size as f64 / 1024.0 / 1024.0 * 100.0).round() / 100.0;
-                let _ = app.emit("download-progress", serde_json::json!({
-                    "svcType": svc_type,
-                    "pct": pct,
-                    "downloaded": downloaded_mb,
-                    "total": total_mb
-                }));
-            } else {
-                // Unknown size: smooth bouncing 5→85→5 pattern
-                let steps = downloaded / (64 * 1024);
-                let cycle = steps % 32;
-                let fake_pct = if cycle <= 16 { 5 + cycle * 5 } else { 85 - (cycle - 16) * 5 } as u32;
-                let _ = app.emit("download-progress", serde_json::json!({
-                    "svcType": svc_type,
-                    "pct": fake_pct,
-                    "downloaded": downloaded_mb,
-                    "total": 0
-                }));
-            }
-        }
-    }
-
-    emit_log("Download complete. Extracting file contents...");
-
-    let dest_path = Path::new(&dest_dir);
+    let dest_path = std::path::PathBuf::from(&dest_dir);
     if !dest_path.parent().unwrap().exists() {
         fs::create_dir_all(dest_path.parent().unwrap()).map_err(|e| e.to_string())?;
     }
 
+    // Streamed to a file next to the destination: kept in memory, a MySQL zip peaked near 400 MB.
+    let zip_path = download_zip_path_for(&dest_path);
+    let written = async {
+        use futures_util::StreamExt;
+        use tokio::io::AsyncWriteExt;
+
+        let file = tokio::fs::File::create(&zip_path)
+            .await
+            .map_err(|e| format!("Cannot create {}: {e}", zip_path.display()))?;
+        let mut file = tokio::io::BufWriter::with_capacity(1 << 20, file);
+        let mut body = res.bytes_stream();
+        let mut downloaded: u64 = 0;
+        // Progress at most every 100 ms: per 64 KB it was ~4,000 UI updates for a 250 MB MySQL zip.
+        let mut last_emit = std::time::Instant::now();
+
+        while let Some(chunk) = body.next().await {
+            let chunk = chunk.map_err(|e| e.to_string())?;
+            file.write_all(&chunk).await.map_err(|e| e.to_string())?;
+            downloaded += chunk.len() as u64;
+
+            if last_emit.elapsed() >= std::time::Duration::from_millis(100) {
+                last_emit = std::time::Instant::now();
+                let downloaded_mb = (downloaded as f64 / 1024.0 / 1024.0 * 100.0).round() / 100.0;
+
+                if total_size > 0 {
+                    let pct = (downloaded as f64 / total_size as f64 * 100.0).min(99.0) as u32;
+                    let total_mb = (total_size as f64 / 1024.0 / 1024.0 * 100.0).round() / 100.0;
+                    let _ = app.emit("download-progress", serde_json::json!({
+                        "svcType": svc_type,
+                        "pct": pct,
+                        "downloaded": downloaded_mb,
+                        "total": total_mb
+                    }));
+                } else {
+                    // Unknown size: smooth bouncing 5→85→5 pattern
+                    let steps = downloaded / (64 * 1024);
+                    let cycle = steps % 32;
+                    let fake_pct = if cycle <= 16 { 5 + cycle * 5 } else { 85 - (cycle - 16) * 5 } as u32;
+                    let _ = app.emit("download-progress", serde_json::json!({
+                        "svcType": svc_type,
+                        "pct": fake_pct,
+                        "downloaded": downloaded_mb,
+                        "total": 0
+                    }));
+                }
+            }
+        }
+        file.flush().await.map_err(|e| e.to_string())
+    }
+    .await;
+    if let Err(e) = written {
+        let _ = fs::remove_file(&zip_path);
+        return Err(e);
+    }
+
+    emit_log("Download complete. Extracting file contents...");
+
+    // Extraction, moves and post-install checks take seconds: keep them off the async workers.
+    let zip = zip_path.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        unpack_install(&svc_type, &version, &dest_path, &zip, emit_log)
+    })
+    .await;
+    let _ = fs::remove_file(&zip_path);
+    result.map_err(|e| e.to_string())?
+}
+
+/// `<dest>.download.zip`, the temporary download next to the install folder.
+fn download_zip_path_for(dest: &Path) -> std::path::PathBuf {
+    let name = dest.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    dest.with_file_name(format!("{name}.download.zip"))
+}
+
+/// Extracts the downloaded zip into `dest_path` and runs the per-service post-install steps.
+fn unpack_install(
+    svc_type: &str,
+    version: &str,
+    dest_path: &Path,
+    zip_path: &Path,
+    emit_log: impl Fn(&str),
+) -> Result<String, String> {
     let temp_extract_dir = temp_extract_dir_for(dest_path);
     if temp_extract_dir.exists() {
         fs::remove_dir_all(&temp_extract_dir).ok();
@@ -2859,8 +2934,8 @@ async fn install_binary(
 
     // Any failure below must not leave the extracted copy behind.
     let placed = (|| -> Result<(), String> {
-        let cursor = std::io::Cursor::new(bytes);
-        zip_extract::extract(cursor, &temp_extract_dir, true).map_err(|e| e.to_string())?;
+        let zip = fs::File::open(zip_path).map_err(|e| e.to_string())?;
+        zip_extract::extract(std::io::BufReader::new(zip), &temp_extract_dir, true).map_err(|e| e.to_string())?;
 
         emit_log("Extraction finished. Finalizing paths...");
 
@@ -2903,7 +2978,7 @@ async fn install_binary(
                 });
             }
         }
-        let keep: &[&str] = match svc_type.as_str() {
+        let keep: &[&str] = match svc_type {
             "db" => &["data", "my.ini"],
             "php" => &["php.ini"],
             _ => &[],
@@ -3094,11 +3169,15 @@ async fn fetch_apache_versions() -> Result<Vec<serde_json::Value>, String> {
     let mut seen = std::collections::HashSet::new();
     let mut results: Vec<serde_json::Value> = Vec::new();
 
-    for base_url in &urls {
-        let Ok(resp) = client.get(*base_url).send().await else {
-            continue;
-        };
-        let Ok(html) = resp.text().await else {
+    // Fetch every page at once, then scan them in the order above so dedup picks the same URLs.
+    let pages = futures_util::future::join_all(urls.iter().map(|base_url| {
+        let client = &client;
+        async move { client.get(*base_url).send().await.ok()?.text().await.ok() }
+    }))
+    .await;
+
+    for (base_url, html) in urls.iter().zip(pages) {
+        let Some(html) = html else {
             continue;
         };
 
@@ -3253,7 +3332,8 @@ async fn run_mysql_query(exe_path: String, query: String, port: Option<u16>) -> 
         const CREATE_NO_WINDOW: u32 = 0x08000000;
         let mysql_port = port.unwrap_or(3306).to_string();
         
-        let output = std::process::Command::new(exe_path)
+        let mut command = std::process::Command::new(exe_path);
+        command
             .args([
                 "--protocol=TCP",
                 "-h",
@@ -3267,8 +3347,11 @@ async fn run_mysql_query(exe_path: String, query: String, port: Option<u16>) -> 
                 "-e",
                 &query,
             ])
-            .creation_flags(CREATE_NO_WINDOW)
-            .output()
+            .creation_flags(CREATE_NO_WINDOW);
+        // Up to the 5 s connect timeout: keep it off the async workers.
+        let output = tauri::async_runtime::spawn_blocking(move || command.output())
+            .await
+            .map_err(|e| e.to_string())?
             .map_err(|e| e.to_string())?;
 
         if output.status.success() {
@@ -3467,6 +3550,7 @@ pub fn run() {
             path_exists,
             find_redis_server,
             list_subdirs,
+            find_project_manifests,
             list_node_versions,
             activate_node_version,
             deactivate_node_version,
@@ -3585,7 +3669,10 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
-    use super::{check_ports_status, patch_httpd_conf, replace_dir, set_ini_value, temp_extract_dir_for, upsert_mysqld_values};
+    use super::{
+        check_ports_status, download_zip_path_for, find_project_manifests, patch_httpd_conf, replace_dir, set_ini_value,
+        temp_extract_dir_for, upsert_mysqld_values,
+    };
 
     #[test]
     fn ini_value_is_set_on_any_line_and_missing_keys_are_reported() {
@@ -3615,6 +3702,43 @@ mod tests {
     fn temp_extract_dir_keeps_the_full_version() {
         let dir = temp_extract_dir_for(std::path::Path::new(r"F:\devstack\bin\php\php-8.3.30"));
         assert_eq!(dir, std::path::PathBuf::from(r"F:\devstack\bin\php\php-8.3.30.tmp_extract"));
+        let zip = download_zip_path_for(std::path::Path::new(r"F:\devstack\bin\php\php-8.3.30"));
+        assert_eq!(zip, std::path::PathBuf::from(r"F:\devstack\bin\php\php-8.3.30.download.zip"));
+    }
+
+    #[test]
+    fn unpack_install_extracts_the_downloaded_zip_into_place() {
+        use std::io::Write;
+        let root = std::env::temp_dir().join(format!("devstack-unpack-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let (dest, zip_path) = (root.join("redis-7.0.0"), root.join("redis-7.0.0.download.zip"));
+        let mut zip = zip::ZipWriter::new(std::fs::File::create(&zip_path).unwrap());
+        zip.start_file("redis-7.0.0-win/redis-server.exe", zip::write::SimpleFileOptions::default()).unwrap();
+        zip.write_all(b"exe").unwrap();
+        zip.finish().unwrap();
+
+        super::unpack_install("redis", "7.0.0", &dest, &zip_path, |_| {}).unwrap();
+        assert_eq!(std::fs::read_to_string(dest.join("redis-server.exe")).unwrap(), "exe");
+        assert!(!root.join("redis-7.0.0.tmp_extract").exists());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn project_manifests_are_found_one_or_two_levels_down() {
+        let root = std::env::temp_dir().join(format!("devstack-manifests-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        for dir in ["app", "work/api", "work/node_modules", "deep/a/b"] {
+            std::fs::create_dir_all(root.join(dir)).unwrap();
+            std::fs::write(root.join(dir).join("devstack.json"), "{}").unwrap();
+        }
+        let www = format!("{}/", root.to_string_lossy().replace('\\', "/"));
+        let mut found = find_project_manifests(www);
+        found.sort();
+        let base = root.to_string_lossy().replace('/', "\\");
+        assert_eq!(found, vec![format!("{base}\\app\\devstack.json"), format!("{base}\\work\\api\\devstack.json")]);
+        assert!(find_project_manifests(String::new()).is_empty());
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

@@ -105,7 +105,7 @@ pub fn write_managed_block(path: String, name: String, comment: String, body: St
     write_if_changed(&path, &old, &new)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn read_text_file(path: String) -> Result<String, String> {
     fs::read_to_string(&path).map_err(|e| format!("Cannot read {path}: {e}"))
 }
@@ -558,11 +558,29 @@ pub fn stop_windows_service(name: String) -> Result<String, String> {
     }
 }
 
+#[cfg(target_os = "windows")]
+#[link(name = "dnsapi")]
+extern "system" {
+    /// What `ipconfig /flushdns` calls (exported by dnsapi.dll, absent from the SDK headers).
+    fn DnsFlushResolverCache() -> i32;
+}
+
+fn flush_dns_cache() {
+    #[cfg(target_os = "windows")]
+    {
+        // SAFETY: takes no arguments and only returns a BOOL.
+        if unsafe { DnsFlushResolverCache() } != 0 {
+            return;
+        }
+    }
+    let _ = hidden_command("ipconfig").arg("/flushdns").output();
+}
+
 /// Flushes the DNS cache, then returns the hosts that do not resolve to 127.0.0.1.
 #[tauri::command(async)]
 pub fn flush_dns_and_check(domains: Vec<String>) -> Vec<String> {
     use std::net::ToSocketAddrs;
-    let _ = hidden_command("ipconfig").arg("/flushdns").output();
+    flush_dns_cache();
     domains
         .into_iter()
         .filter(|d| {
@@ -615,7 +633,7 @@ pub fn run_program(exe: String, args: Vec<String>, env: std::collections::HashMa
 }
 
 /// File names in `dir` with the given extension (case-insensitive), newest first.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn list_files(dir: String, ext: String) -> Vec<String> {
     let Ok(entries) = fs::read_dir(&dir) else { return Vec::new() };
     let mut files: Vec<(u64, String)> = entries
@@ -685,8 +703,15 @@ pub fn pem_not_after(pem: &str) -> Option<String> {
     Some(format!("{year:04}-{}-{}", rest.get(0..2)?, rest.get(2..4)?))
 }
 
-#[tauri::command(async)]
-pub fn mkcert_install(mkcert_exe: String) -> Result<(), String> {
+/// Can wait on the Windows "install this certificate?" prompt, so it runs on a blocking thread.
+#[tauri::command]
+pub async fn mkcert_install(mkcert_exe: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || mkcert_install_blocking(mkcert_exe))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+fn mkcert_install_blocking(mkcert_exe: String) -> Result<(), String> {
     let output = hidden_command(&mkcert_exe)
         .arg("-install")
         .output()
@@ -707,8 +732,19 @@ pub struct CertInfo {
 }
 
 /// Generates `<cert_dir>/<name>.pem` + `<name>-key.pem` covering every host.
-#[tauri::command(async)]
-pub fn mkcert_generate(
+#[tauri::command]
+pub async fn mkcert_generate(
+    mkcert_exe: String,
+    cert_dir: String,
+    name: String,
+    hosts: Vec<String>,
+) -> Result<CertInfo, String> {
+    tauri::async_runtime::spawn_blocking(move || mkcert_generate_blocking(mkcert_exe, cert_dir, name, hosts))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+fn mkcert_generate_blocking(
     mkcert_exe: String,
     cert_dir: String,
     name: String,
@@ -748,7 +784,52 @@ pub fn mkcert_generate(
 
 // --- CA bundle for PHP ----------------------------------------------------------
 
-const EXPORT_ROOTS_PS: &str = "$c=@{}; foreach($s in 'Cert:\\LocalMachine\\Root','Cert:\\CurrentUser\\Root'){ Get-ChildItem $s | ForEach-Object { $c[$_.Thumbprint]=$_ } }; foreach($x in $c.Values){ '# ' + $x.Subject; [Convert]::ToBase64String($x.RawData) }";
+/// `# <subject>` + base64 DER lines for every distinct certificate in the machine and user
+/// ROOT stores (what `Cert:\LocalMachine\Root` + `Cert:\CurrentUser\Root` list in PowerShell).
+#[cfg(target_os = "windows")]
+fn export_root_certs() -> String {
+    use windows_sys::Win32::Security::Cryptography::*;
+    let store_name: Vec<u16> = "ROOT\0".encode_utf16().collect();
+    let mut seen = std::collections::HashSet::new();
+    let mut export = String::new();
+    for location in [CERT_SYSTEM_STORE_LOCAL_MACHINE, CERT_SYSTEM_STORE_CURRENT_USER] {
+        // SAFETY: the store is opened read-only and closed below; each context stays valid
+        // until it is passed back to CertEnumCertificatesInStore, which frees it.
+        unsafe {
+            let store = CertOpenStore(CERT_STORE_PROV_SYSTEM_W, 0, 0, location | CERT_STORE_READONLY_FLAG, store_name.as_ptr() as _);
+            if store.is_null() {
+                continue;
+            }
+            let mut ctx = CertEnumCertificatesInStore(store, std::ptr::null());
+            while !ctx.is_null() {
+                let cert = &*ctx;
+                let der = std::slice::from_raw_parts(cert.pbCertEncoded, cert.cbCertEncoded as usize);
+                if seen.insert(der.to_vec()) {
+                    let mut subject = [0u16; 1024];
+                    let len = CertNameToStrW(
+                        X509_ASN_ENCODING,
+                        &(*cert.pCertInfo).Subject,
+                        CERT_X500_NAME_STR | CERT_NAME_STR_REVERSE_FLAG,
+                        subject.as_mut_ptr(),
+                        subject.len() as u32,
+                    ) as usize;
+                    let subject = String::from_utf16_lossy(&subject[..len.saturating_sub(1)]);
+                    export.push_str(&format!("# {}\n", subject.replace(['\r', '\n'], " ")));
+                    export.push_str(&base64::engine::general_purpose::STANDARD.encode(der));
+                    export.push('\n');
+                }
+                ctx = CertEnumCertificatesInStore(store, ctx);
+            }
+            CertCloseStore(store, 0);
+        }
+    }
+    export
+}
+
+#[cfg(not(target_os = "windows"))]
+fn export_root_certs() -> String {
+    String::new()
+}
 
 fn pem_bundle(export: &str) -> (String, usize) {
     let mut out = String::new();
@@ -772,16 +853,15 @@ fn pem_bundle(export: &str) -> (String, usize) {
 
 /// Exports the Windows root stores (machine + user, so the mkcert CA is included)
 /// as a PEM bundle PHP can use for `curl.cainfo` / `openssl.cafile`.
-#[tauri::command(async)]
-pub fn build_ca_bundle(dest: String) -> Result<usize, String> {
-    let output = hidden_command("powershell")
-        .args(["-NoProfile", "-NonInteractive", "-Command", EXPORT_ROOTS_PS])
-        .output()
-        .map_err(|e| format!("Cannot run PowerShell: {e}"))?;
-    if !output.status.success() {
-        return Err(format!("Exporting Windows root certificates failed: {}", output_text(&output)));
-    }
-    let (bundle, count) = pem_bundle(&String::from_utf8_lossy(&output.stdout));
+#[tauri::command]
+pub async fn build_ca_bundle(dest: String) -> Result<usize, String> {
+    tauri::async_runtime::spawn_blocking(move || build_ca_bundle_blocking(dest))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+fn build_ca_bundle_blocking(dest: String) -> Result<usize, String> {
+    let (bundle, count) = pem_bundle(&export_root_certs());
     if count == 0 {
         return Err("No root certificates were exported".into());
     }
@@ -936,6 +1016,17 @@ R1O7Cr8GyxmTVH054MJLVX+3NEfn9yoEbSPc1SGfo5VYetg9UzBmo2za
 ";
         assert_eq!(pem_not_after(pem).as_deref(), Some("2036-10-05"));
         assert!(pem_not_after("garbage").is_none());
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn exports_each_windows_root_once() {
+        let export = export_root_certs();
+        let (_, count) = pem_bundle(&export);
+        let certs: Vec<&str> = export.lines().filter(|l| !l.starts_with('#')).collect();
+        assert!(count > 0);
+        assert_eq!(certs.len(), count);
+        assert_eq!(certs.iter().collect::<std::collections::HashSet<_>>().len(), count);
     }
 
     #[test]

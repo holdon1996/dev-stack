@@ -202,8 +202,18 @@ fn cloudflare_login_blocking(executable: String) -> Result<String, String> {
 
 /// Writes `~/.cloudflared/devstack/<tunnel>.yml` with one ingress rule per route
 /// and points DNS for hostnames that are new to this tunnel.
-#[tauri::command(async)]
-pub fn prepare_cloudflare_tunnel(
+#[tauri::command]
+pub async fn prepare_cloudflare_tunnel(
+    executable: String,
+    tunnel_name: String,
+    routes: Vec<TunnelRoute>,
+) -> Result<PreparedTunnel, String> {
+    tauri::async_runtime::spawn_blocking(move || prepare_cloudflare_tunnel_blocking(executable, tunnel_name, routes))
+        .await
+        .map_err(|error| error.to_string())?
+}
+
+fn prepare_cloudflare_tunnel_blocking(
     executable: String,
     tunnel_name: String,
     routes: Vec<TunnelRoute>,
