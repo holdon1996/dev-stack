@@ -260,7 +260,7 @@ const MinioPanel = () => {
 };
 
 const FcgiPools = () => {
-  const { fcgiPools, procs, setActivePage, restartFcgiPool, fcgiProcessId, t } = useStore();
+  const { fcgiPools, procs, setActivePage, restartFcgiPool, fcgiProcessId, siteApplying, t } = useStore();
   void procs; // re-render when pool processes change
   const pools = fcgiPools();
   const [openLog, setOpenLog] = useState(null);
@@ -309,7 +309,7 @@ const FcgiPools = () => {
                       className="btn-ghost p-1.5"
                       title={t('fcgiPoolRestart')}
                       aria-label={t('fcgiPoolRestart')}
-                      disabled={restarting === pool.key}
+                      disabled={restarting === pool.key || siteApplying}
                       onClick={async () => { setRestarting(pool.key); await restartFcgiPool(pool.key); setRestarting(null); }}
                     >
                       {restarting === pool.key ? <Loader size={13} className="animate-spin" /> : <RotateCcw size={13} />}

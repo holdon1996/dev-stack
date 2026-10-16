@@ -42,10 +42,13 @@ export const createUiSlice = (set, get) => ({
      * `key`: the source (e.g. `svc:2` for MySQL). A visible error or warning is not replaced by
      * progress or success from another source (Apache "running" must not hide MySQL's failure),
      * but the same source may replace it (a successful retry clears its own old error).
+     * Toasts without a key share one source.
      */
     showToast: (msg, type = 'ok', { action, key } = {}) => {
         const current = get().toast;
-        const sameSource = key && current.key === key;
+        // Toasts without a key count as one source, so a successful retry (e.g. applying sites
+        // again after an httpd -t error) still replaces its own earlier error.
+        const sameSource = current.key === key;
         const protectedNow = current.show && !sameSource
             && ((current.type === 'danger' && type !== 'danger') || (current.type === 'warn' && (type === 'ok' || type === 'info')));
         if (protectedNow) return;

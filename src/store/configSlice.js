@@ -350,9 +350,13 @@ export const createConfigSlice = (set, get) => ({
             const site = get().sites.find(s => s.key === name);
             if (site && get()._activeApacheRoot() && await get().enableSite(site)) {
                 const cfg = get().siteConfigs[name];
-                showToast(t('projectReady', { domain: cfg.domain }), 'ok', {
-                    action: { label: t('openInBrowser'), url: `${cfg.ssl ? 'https' : 'http'}://${cfg.domain}` },
-                });
+                if (get().services.find(s => s.type === 'web')?.status === 'running') {
+                    showToast(t('projectReady', { domain: cfg.domain }), 'ok', {
+                        action: { label: t('openInBrowser'), url: `${cfg.ssl ? 'https' : 'http'}://${cfg.domain}` },
+                    });
+                } else {
+                    showToast(t('projectReadyStartApache', { domain: cfg.domain }), 'info', { action: { label: t('services'), page: 'services' } });
+                }
             } else {
                 showToast(t('projectCreated', { name }), 'ok');
             }

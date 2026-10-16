@@ -499,7 +499,8 @@ export const createSiteSlice = (set, get) => ({
             // Only a changed config or certificate needs Apache restarted (every site briefly
             // down). A FastCGI site's new PHP version is just a pool swap, done above.
             // apply_apache_sites has just run `httpd -t` on exactly this config.
-            if (restart && apacheRunning && (report.changed || certsChanged)) await get().restartApache({ configVerified: true });
+            // Also when the running Apache is already behind the files (an earlier restart failed).
+            if (restart && apacheRunning && (report.changed || certsChanged || get().apacheConfigStale)) await get().restartApache({ configVerified: true });
             return true;
         } catch (e) {
             const message = typeof e === 'string' ? e : e?.message || String(e);
@@ -546,7 +547,7 @@ export const createSiteSlice = (set, get) => ({
             domains: entries.filter(e => e.ip === '127.0.0.1').map(e => e.host),
         });
         set({ hostsUnresolved: unresolved });
-        if (unresolved.length) showToast(t('hostsNotResolving', { hosts: unresolved.join(', ') }), 'warn');
+        if (unresolved.length) showToast(t('hostsNotResolving', { hosts: unresolved.join(', ') }), 'warn', { key: 'hosts' });
         await get().loadHostsFile();
         return true;
     },
