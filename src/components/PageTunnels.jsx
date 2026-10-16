@@ -8,7 +8,7 @@ const providers = [
   {
     id: 'cloudflare',
     name: 'Cloudflare',
-    desc: 'Free, no account needed for quick tunnels',
+    descKey: 'tunnelProviderDescCloudflare',
     gradientFrom: '#f48120',
     gradientTo: '#f4a460',
     needsAuth: false,
@@ -16,13 +16,14 @@ const providers = [
   {
     id: 'ngrok',
     name: 'ngrok',
-    desc: 'Popular tunneling, freemium plan',
+    descKey: 'tunnelProviderDescNgrok',
     gradientFrom: '#4a65ff',
     gradientTo: '#a78bfa',
     needsAuth: true,
-    authLabel: 'Auth Token',
   },
 ];
+
+const TUNNEL_STATUS_KEYS = { running: 'statusRunning', stopped: 'statusStopped', starting: 'statusStarting', installing: 'installing' };
 
 const PageTunnels = () => {
   const {
@@ -97,28 +98,31 @@ const PageTunnels = () => {
         {/* Provider Cards */}
         <div className="grid grid-cols-3 gap-3">
           {providers.map(p => (
-            <div
+            <button
+              type="button"
               key={p.id}
-              onClick={() => { if (tunnelStatus === 'stopped') setTunnelProvider(p.id); }}
-              className={`relative bg-surface border rounded-xl p-4 cursor-pointer transition-all duration-200 overflow-hidden
+              aria-pressed={tunnelProvider === p.id}
+              disabled={tunnelStatus !== 'stopped'}
+              onClick={() => setTunnelProvider(p.id)}
+              className={`relative text-left bg-surface border rounded-xl p-4 cursor-pointer transition-all duration-200 overflow-hidden
                 ${tunnelProvider === p.id ? 'border-accent shadow-[0_0_20px_rgba(0,229,160,0.1)]' : 'border-border hover:border-[#3d4049]'}
                 ${isBusy || (tunnelStatus === 'running' && tunnelProvider !== p.id) ? 'opacity-40 pointer-events-none' : ''}
               `}
             >
-              <div
+              <span
                 className="absolute top-0 left-0 right-0 h-[3px]"
                 style={{ background: `linear-gradient(90deg, ${p.gradientFrom}, ${p.gradientTo})` }}
               />
-              <div className="flex items-center justify-between mb-1.5 mt-1">
+              <span className="flex items-center justify-between mb-1.5 mt-1">
                 <span className="text-[15px] font-bold">{p.name}</span>
                 {tunnelInstalled[p.id] ? (
                   <span className="text-[11px] text-accent font-bold flex items-center gap-1"><Check size={10} /> {t('readyLabel')}</span>
                 ) : (
                   <span className="text-[11px] text-muted font-bold">{t('notInstalledLabel')}</span>
                 )}
-              </div>
-              <div className="text-[11px] text-muted leading-relaxed">{p.desc}</div>
-            </div>
+              </span>
+              <span className="block text-[11px] text-muted leading-relaxed">{t(p.descKey)}</span>
+            </button>
           ))}
         </div>
 
@@ -157,7 +161,7 @@ const PageTunnels = () => {
             </div>
             {currentProvider?.needsAuth && (
               <div className="flex flex-col gap-1.5">
-                <label className="text-[12px] font-semibold text-textDim">{currentProvider.authLabel}</label>
+                <label className="text-[12px] font-semibold text-textDim">{t('authToken')}</label>
                 <input
                   type="password" className="input-field" value={authToken}
                   onChange={(e) => setAuthToken(e.target.value)}
@@ -269,14 +273,14 @@ const PageTunnels = () => {
               <span className={`status-dot ${tunnelStatus === 'running' ? 'dot-running' :
                 isBusy ? 'dot-warn' : 'dot-stopped'
                 }`} />
-              <span className="text-[12px] text-textDim font-mono capitalize">{tunnelStatus}</span>
+              <span className="text-[12px] text-textDim font-mono capitalize">{t(TUNNEL_STATUS_KEYS[tunnelStatus] || tunnelStatus)}</span>
             </div>
           </div>
 
           {tunnelStatus === 'installing' && (
             <div className="mt-4 rounded-lg border border-border bg-[#111318] px-3 py-3">
               <div className="mb-2 flex items-center justify-between text-[11px] font-mono text-textDim">
-                <span>Download Progress</span>
+                <span>{t('downloadProgress')}</span>
                 <span>
                   {tunnelInstallProgress.pct || 0}% 
                   {tunnelInstallProgress.total

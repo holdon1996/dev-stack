@@ -3,11 +3,14 @@ import { useStore } from '../store';
 import { Globe, Database, Code, Monitor, ExternalLink, Edit3, Check, X, FileCode, FolderSearch, Terminal } from 'lucide-react';
 
 const categoryMeta = {
-  'Web Server': { icon: Globe, color: '#f48120' },
-  'Database': { icon: Database, color: '#4a9eff' },
+  'Web Server': { icon: Globe, color: '#f48120', labelKey: 'configCatWebServer' },
+  'Database': { icon: Database, color: '#4a9eff', labelKey: 'database' },
   'PHP': { icon: Code, color: '#8892be' },
-  'System': { icon: Monitor, color: '#f5a623' },
+  'System': { icon: Monitor, color: '#f5a623', labelKey: 'system' },
 };
+
+// `source` of the active MySQL version's my.ini.
+const DEFAULT_SOURCE = 'default';
 
 const ConfigCard = ({ file }) => {
   const { openConfigFile, updateConfigPath, browseForFile, browseForEditor, showToast, t } = useStore();
@@ -37,7 +40,7 @@ const ConfigCard = ({ file }) => {
     openConfigFile(file.id, false, file.path);
   };
 
-  const isActive = file.source === 'Mặc định';
+  const isActive = file.source === DEFAULT_SOURCE;
 
   return (
     <div className={`bg-surface border rounded-xl p-4 transition-all duration-200 group
@@ -60,11 +63,11 @@ const ConfigCard = ({ file }) => {
                   file.source === 'Laragon' ? 'bg-blue-500/20 text-blue-500 border-blue-500/30' :
                     'bg-accent/20 text-accent border-accent/30'}
               `}>
-                {file.source === 'Mặc định' ? t('defaultLabel') : file.source}
+                {file.source === DEFAULT_SOURCE ? t('defaultLabel') : file.source === 'System' ? t('system') : file.source}
               </span>
             )}
           </div>
-          <div className="text-[11px] text-muted mb-2">{file.desc}</div>
+          <div className="text-[11px] text-muted mb-2">{t(file.descKey)}</div>
 
           {editing ? (
             <div className="flex gap-1.5">
@@ -83,8 +86,8 @@ const ConfigCard = ({ file }) => {
               >
                 <FolderSearch size={12} />
               </button>
-              <button className="btn-primary py-1 px-2 text-[11px]" onClick={handleSave}><Check size={12} /></button>
-              <button className="btn-ghost py-1 px-2 text-[11px]" onClick={() => setEditing(false)}><X size={12} /></button>
+              <button type="button" className="btn-primary py-1 px-2 text-[11px]" onClick={handleSave} aria-label={t('save')} title={t('save')}><Check size={12} /></button>
+              <button type="button" className="btn-ghost py-1 px-2 text-[11px]" onClick={() => setEditing(false)} aria-label={t('cancel')} title={t('cancel')}><X size={12} /></button>
             </div>
           ) : (
             <div className="flex items-center gap-1.5">
@@ -167,7 +170,7 @@ const PageQuickConfig = () => {
                     id: `my_ini_${v.version}`,
                     label: `my.ini (MySQL ${v.version})`,
                     path: `${devDir}/bin/mysql/mysql-${v.version}/my.ini`,
-                    source: v.active ? 'Mặc định' : 'DevStack'
+                    source: v.active ? DEFAULT_SOURCE : 'DevStack'
                   });
                 });
               } else {
@@ -197,10 +200,10 @@ const PageQuickConfig = () => {
             }
           });
 
-          // Sort active (Mặc định) to the top/left
+          // Sort the active version to the top/left
           displayFiles.sort((a, b) => {
-            if (a.source === 'Mặc định') return -1;
-            if (b.source === 'Mặc định') return 1;
+            if (a.source === DEFAULT_SOURCE) return -1;
+            if (b.source === DEFAULT_SOURCE) return 1;
             return 0;
           });
 
@@ -208,7 +211,7 @@ const PageQuickConfig = () => {
             <div key={cat}>
               <div className="flex items-center gap-2 mb-3">
                 <CatIcon size={14} style={{ color: meta.color }} />
-                <span className="text-[11px] font-bold text-muted tracking-[0.08em] uppercase">{cat}</span>
+                <span className="text-[11px] font-bold text-muted tracking-[0.08em] uppercase">{meta.labelKey ? t(meta.labelKey) : cat}</span>
               </div>
               <div className="grid grid-cols-2 gap-3">
                 {displayFiles.map(file => (

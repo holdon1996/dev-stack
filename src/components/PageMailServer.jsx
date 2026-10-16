@@ -5,27 +5,29 @@ import { Check, Copy, Download, ExternalLink, Inbox, Loader, Mail, Play, Square 
 import { useStore } from '../store';
 import { MAILPIT_DOCS, MAILPIT_FALLBACK, fetchLatestMailpitRelease, mailProviders, snippetForMail } from '../lib/mail';
 
-const ProviderCard = ({ provider, active, onClick }) => (
+const ProviderCard = ({ provider, active, onClick, t }) => (
   <button
+    type="button"
+    aria-pressed={active}
     onClick={onClick}
     className={`rounded-lg border p-4 text-left transition-colors ${active ? 'border-accent bg-accent/10' : 'border-border bg-surface hover:border-white/15'}`}
   >
     <div className="flex items-start justify-between gap-3">
       <div className="text-[15px] font-bold text-white">{provider.name}</div>
       <span className={`rounded-md px-2 py-1 text-[11px] font-bold uppercase tracking-[0.12em] ${active ? 'bg-accent text-bg' : 'border border-white/10 text-textDim'}`}>
-        {provider.tag}
+        {t(provider.tagKey)}
       </span>
     </div>
-    <p className="mt-3 text-[12px] leading-6 text-textDim">{provider.desc}</p>
+    <p className="mt-3 text-[12px] leading-6 text-textDim">{t(provider.descKey)}</p>
   </button>
 );
 
-const Snippet = ({ label, value, copied, onCopy }) => (
+const Snippet = ({ label, value, copied, onCopy, t }) => (
   <div className="rounded-lg border border-white/8 bg-bg p-4">
     <div className="mb-2 flex items-center justify-between gap-3">
       <div className="text-[12px] font-semibold text-white">{label}</div>
-      <button className="btn-ghost flex items-center gap-1.5 px-2.5 py-1 text-[11px]" onClick={onCopy}>
-        {copied ? <Check size={12} /> : <Copy size={12} />} Copy
+      <button type="button" className="btn-ghost flex items-center gap-1.5 px-2.5 py-1 text-[11px]" onClick={onCopy}>
+        {copied ? <Check size={12} /> : <Copy size={12} />} {copied ? t('copied') : t('copy')}
       </button>
     </div>
     <pre className="overflow-x-auto whitespace-pre-wrap text-[12px] leading-6 text-slate-200">{value}</pre>
@@ -33,7 +35,7 @@ const Snippet = ({ label, value, copied, onCopy }) => (
 );
 
 const PageMailServer = () => {
-  const { settings, updateSetting, updateSettings, showToast, toggleService } = useStore();
+  const { settings, updateSetting, updateSettings, showToast, toggleService, t } = useStore();
   // Running state comes from the shared service poll (no own port polling), and Start/Stop
   // go through toggleService like the Services row: port-owner check, crash detection, logs.
   const mailSvc = useStore(s => s.services.find(x => x.type === 'mail'));
@@ -111,11 +113,11 @@ const PageMailServer = () => {
         mailUiPort: settings.mailUiPort || 8025,
         mailpitVersion: release.version,
       });
-      showToast(`Mailpit ${release.version} installed`, 'ok');
+      showToast(t('versionInstalled', { name: `Mailpit ${release.version}` }), 'ok');
       await refreshStatus();
     } catch (e) {
       console.error('installMailpit failed:', e);
-      showToast(`Không cài được Mailpit: ${e}`, 'danger');
+      showToast(t('mailpitInstallFailed', { error: `${e}` }), 'danger');
     } finally {
       if (unlisten) unlisten();
       setInstalling(false);
@@ -124,7 +126,7 @@ const PageMailServer = () => {
 
   const startMailpit = () => {
     if (!installed) {
-      showToast('Hãy cài Mailpit trước', 'warn');
+      showToast(t('mailpitNotInstalled'), 'warn');
       return;
     }
     if (mailSvc) toggleService(mailSvc.id, 'start');
@@ -138,7 +140,7 @@ const PageMailServer = () => {
     try {
       await invoke('open_external_target', { target });
     } catch (e) {
-      showToast(`Không mở được link: ${e}`, 'danger');
+      showToast(t('openLinkFailed', { error: `${e}` }), 'danger');
     }
   };
 
@@ -146,10 +148,10 @@ const PageMailServer = () => {
     try {
       await navigator.clipboard.writeText(value);
       setCopiedKey(key);
-      showToast('Đã copy cấu hình mail', 'ok');
+      showToast(t('mailConfigCopied'), 'ok');
       window.setTimeout(() => setCopiedKey(''), 1600);
     } catch (e) {
-      showToast(`Không copy được: ${e}`, 'danger');
+      showToast(t('copyFailedError', { error: `${e}` }), 'danger');
     }
   };
 
@@ -164,10 +166,10 @@ const PageMailServer = () => {
     <div className="flex-1 flex flex-col overflow-hidden">
       <div className="px-6 py-5 border-b border-[#1a1c22] bg-bg">
         <h1 className="m-0 flex items-center gap-2 text-[20px] font-extrabold">
-          <Mail size={18} className="text-accent" /> Mail Server
+          <Mail size={18} className="text-accent" /> {t('mailServer')}
         </h1>
         <p className="m-0 mt-1 text-[12px] font-mono text-muted">
-          Cài SMTP inbox local để test email reset password, verify account, receipt và mail template.
+          {t('mailServerDesc')}
         </p>
       </div>
 
@@ -175,14 +177,13 @@ const PageMailServer = () => {
         <div className="rounded-lg border border-accent/20 bg-[#15201c] p-5">
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div>
-              <div className="text-[15px] font-bold text-white">Đề xuất hiện tại: Mailpit</div>
+              <div className="text-[15px] font-bold text-white">{t('mailRecommendTitle')}</div>
               <p className="mt-2 max-w-4xl text-[13px] leading-7 text-slate-200">
-                Mailpit miễn phí, có binary Windows riêng và đang được maintain tích cực. Bản mới nhất đã kiểm tra: {release.version}.
-                Mặc định SMTP port 1025 và web inbox port 8025.
+                {t('mailRecommendDesc', { version: release.version })}
               </p>
             </div>
             <div className={`rounded-md border px-3 py-2 text-[11px] font-bold uppercase tracking-[0.12em] ${running ? 'border-accent/30 bg-accent/10 text-accent' : 'border-white/10 text-textDim'}`}>
-              {running ? 'Running' : installed ? 'Installed' : 'Not installed'}
+              {running ? t('running') : installed ? t('installed') : t('notInstalledLabel')}
             </div>
           </div>
         </div>
@@ -194,6 +195,7 @@ const PageMailServer = () => {
               provider={provider}
               active={providerId === provider.id}
               onClick={() => selectProvider(provider.id)}
+              t={t}
             />
           ))}
         </div>
@@ -202,18 +204,18 @@ const PageMailServer = () => {
           <div className="rounded-lg border border-border bg-surface p-5">
             <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border pb-4">
               <div>
-                <div className="text-[11px] font-bold uppercase tracking-[0.12em] text-muted">Mailpit local runtime</div>
+                <div className="text-[11px] font-bold uppercase tracking-[0.12em] text-muted">{t('mailRuntimeTitle')}</div>
                 <div className="mt-1 text-[12px] text-textDim">{mailpitExe}</div>
               </div>
               <div className="flex flex-wrap gap-2">
-                <button className="btn-ghost flex items-center gap-2" onClick={installMailpit} disabled={installing}>
-                  {installing ? <Loader size={14} className="animate-spin" /> : <Download size={14} />} {installed ? 'Cập nhật' : 'Cài đặt'}
+                <button type="button" className="btn-ghost flex items-center gap-2" onClick={installMailpit} disabled={installing}>
+                  {installing ? <Loader size={14} className="animate-spin" /> : <Download size={14} />} {installed ? t('updateAction') : t('install')}
                 </button>
                 <button type="button" className="btn-ghost flex items-center gap-2" onClick={running ? stopMailpit : startMailpit} disabled={installing || transitioning}>
-                  {running ? <Square size={13} /> : <Play size={13} />} {running ? 'Stop' : 'Start'}
+                  {running ? <Square size={13} /> : <Play size={13} />} {running ? t('stop') : t('start')}
                 </button>
-                <button className="btn-ghost flex items-center gap-2" onClick={() => openExternal(inboxUrl)}>
-                  <Inbox size={13} /> Inbox
+                <button type="button" className="btn-ghost flex items-center gap-2" onClick={() => openExternal(inboxUrl)}>
+                  <Inbox size={13} /> {t('inboxLabel')}
                 </button>
               </div>
             </div>
@@ -221,7 +223,7 @@ const PageMailServer = () => {
             {installing && (
               <div className="mt-4 rounded-lg border border-white/8 bg-bg p-4">
                 <div className="mb-2 flex justify-between text-[11px] font-mono text-textDim">
-                  <span>Downloading {release.version}</span>
+                  <span>{t('downloadingVersion', { version: release.version })}</span>
                   <span>{progress.pct}%</span>
                 </div>
                 <div className="bar-bg">
@@ -235,19 +237,19 @@ const PageMailServer = () => {
 
             <div className="mt-5 grid gap-4 sm:grid-cols-2">
               <label className="flex flex-col gap-1.5">
-                <span className="text-[12px] font-semibold text-textDim">SMTP Host</span>
+                <span className="text-[12px] font-semibold text-textDim">{t('smtpHostLabel')}</span>
                 <input className="input-field" value={host} onChange={(e) => updateSetting('mailHost', e.target.value)} />
               </label>
               <label className="flex flex-col gap-1.5">
-                <span className="text-[12px] font-semibold text-textDim">SMTP Port</span>
+                <span className="text-[12px] font-semibold text-textDim">{t('smtpPortLabel')}</span>
                 <input className="input-field" value={smtpPort} onChange={(e) => updateSetting('mailSmtpPort', e.target.value)} />
               </label>
               <label className="flex flex-col gap-1.5">
-                <span className="text-[12px] font-semibold text-textDim">Web Inbox Port</span>
+                <span className="text-[12px] font-semibold text-textDim">{t('webInboxPortLabel')}</span>
                 <input className="input-field" value={uiPort} onChange={(e) => updateSetting('mailUiPort', e.target.value)} />
               </label>
               <label className="flex flex-col gap-1.5">
-                <span className="text-[12px] font-semibold text-textDim">Inbox URL</span>
+                <span className="text-[12px] font-semibold text-textDim">{t('inboxUrlLabel')}</span>
                 <button type="button" className="input-field text-left hover:border-accent/40" onClick={() => openExternal(inboxUrl)}>
                   {inboxUrl}
                 </button>
@@ -255,33 +257,32 @@ const PageMailServer = () => {
             </div>
 
             <div className="mt-5 rounded-lg border border-white/8 bg-bg p-4">
-              <div className="text-[11px] font-bold uppercase tracking-[0.12em] text-muted">Lệnh tương đương</div>
+              <div className="text-[11px] font-bold uppercase tracking-[0.12em] text-muted">{t('equivalentCommand')}</div>
               <pre className="mt-3 overflow-x-auto whitespace-pre-wrap text-[12px] leading-6 text-slate-200">
                 {`mailpit.exe --smtp=${host}:${smtpPort} --listen=${host}:${uiPort}`}
               </pre>
               <div className="mt-4 flex flex-wrap gap-3">
-                <button className="btn-ghost flex items-center gap-2" onClick={() => openExternal(MAILPIT_DOCS)}>
-                  <ExternalLink size={13} /> Tài liệu
+                <button type="button" className="btn-ghost flex items-center gap-2" onClick={() => openExternal(MAILPIT_DOCS)}>
+                  <ExternalLink size={13} /> {t('docsLabel')}
                 </button>
-                <button className="btn-ghost flex items-center gap-2" onClick={() => copyText('command', `mailpit.exe --smtp=${host}:${smtpPort} --listen=${host}:${uiPort}`)}>
-                  {copiedKey === 'command' ? <Check size={13} /> : <Copy size={13} />} Copy lệnh
+                <button type="button" className="btn-ghost flex items-center gap-2" onClick={() => copyText('command', `mailpit.exe --smtp=${host}:${smtpPort} --listen=${host}:${uiPort}`)}>
+                  {copiedKey === 'command' ? <Check size={13} /> : <Copy size={13} />} {t('copyCommand')}
                 </button>
               </div>
             </div>
           </div>
 
           <div className="rounded-lg border border-border bg-surface p-5">
-            <div className="text-[11px] font-bold uppercase tracking-[0.12em] text-muted">Snippet kết nối app</div>
+            <div className="text-[11px] font-bold uppercase tracking-[0.12em] text-muted">{t('appConnectionSnippets')}</div>
             <div className="mt-4 space-y-4">
-              <Snippet label="SMTP endpoint" value={snippets.smtp} copied={copiedKey === 'smtp'} onCopy={() => copyText('smtp', snippets.smtp)} />
-              <Snippet label="Laravel / .env" value={snippets.laravel} copied={copiedKey === 'laravel'} onCopy={() => copyText('laravel', snippets.laravel)} />
-              <Snippet label="Node / Nodemailer" value={snippets.node} copied={copiedKey === 'node'} onCopy={() => copyText('node', snippets.node)} />
-              <Snippet label="WordPress SMTP" value={snippets.wordpress} copied={copiedKey === 'wordpress'} onCopy={() => copyText('wordpress', snippets.wordpress)} />
+              <Snippet t={t} label="SMTP endpoint" value={snippets.smtp} copied={copiedKey === 'smtp'} onCopy={() => copyText('smtp', snippets.smtp)} />
+              <Snippet t={t} label="Laravel / .env" value={snippets.laravel} copied={copiedKey === 'laravel'} onCopy={() => copyText('laravel', snippets.laravel)} />
+              <Snippet t={t} label="Node / Nodemailer" value={snippets.node} copied={copiedKey === 'node'} onCopy={() => copyText('node', snippets.node)} />
+              <Snippet t={t} label="WordPress SMTP" value={snippets.wordpress} copied={copiedKey === 'wordpress'} onCopy={() => copyText('wordpress', snippets.wordpress)} />
             </div>
 
             <div className="mt-4 rounded-lg border border-amber-300/20 bg-amber-300/10 p-4 text-[12px] leading-6 text-amber-50">
-              Mailpit chỉ capture mail local, không gửi ra ngoài nếu app trỏ SMTP vào {host}:{smtpPort}.
-              Khi cần outbound mail thật thì thêm Mailgun/SES/Postmark sau, không nên trộn với local dev.
+              {t('mailLocalOnlyNote', { host, port: smtpPort })}
             </div>
           </div>
         </div>

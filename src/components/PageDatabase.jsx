@@ -271,9 +271,11 @@ const PageDatabase = () => {
                         {t('communityServer')}
                       </div>
                       {v.installed && (
-                        <div
+                        <button
+                          type="button"
                           className={`flex items-center gap-1.5 mt-2 px-2 py-0.5 w-fit border rounded-md transition-all group/port ${v.active ? 'bg-accent/5 border-accent/20 cursor-pointer hover:bg-accent/10 hover:border-accent/40' : 'bg-surface border-border opacity-50 cursor-not-allowed'}`}
                           title={v.active ? t('changePortsOnServices') : t('onlyActivePortChangable')}
+                          aria-disabled={!v.active}
                           onClick={() => {
                             // Ports are changed (validated, applied) on the Services row.
                             if (v.active) useStore.getState().setActivePage('services');
@@ -281,7 +283,7 @@ const PageDatabase = () => {
                         >
                           <span className="text-[11px] font-bold font-mono text-accent">PORT: {v.active ? (settings.portMySQL || 3306) : 3306}</span>
                           {v.active && <Edit2 size={10} className="text-accent/40 group-hover/port:text-accent transition-colors" />}
-                        </div>
+                        </button>
                       )}
                     </div>
                     {v.installed ? (
@@ -445,7 +447,7 @@ const PageDatabase = () => {
             {t('mysqlArchiveTip')}
             <br />
             <a href="https://downloads.mysql.com/archives/community/" target="_blank" className="text-accent hover:underline mt-2 inline-block">
-              MySQL Archives ↗
+              {t('mysqlArchivesLink')}
             </a>
           </div>
         </div>

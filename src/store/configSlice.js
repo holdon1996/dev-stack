@@ -259,14 +259,14 @@ export const createConfigSlice = (set, get) => ({
     },
 
     configFiles: [
-        { id: 'httpd_conf', label: 'httpd.conf', category: 'Web Server', path: '', desc: 'Apache main configuration', source: null },
-        { id: 'vhosts_conf', label: 'httpd-vhosts.conf', category: 'Web Server', path: '', desc: 'Virtual hosts configuration', source: null },
-        { id: 'httpd_ssl', label: 'httpd-ssl.conf', category: 'Web Server', path: '', desc: 'Apache SSL configuration', source: null },
-        { id: 'my_ini', label: 'my.ini', category: 'Database', path: '', desc: 'MySQL server configuration', source: null },
-        { id: 'redis_conf', label: 'redis.conf', category: 'Database', path: '', desc: 'Redis configuration', source: null },
-        { id: 'php_ini', label: 'php.ini', category: 'PHP', path: '', desc: 'PHP main configuration', source: null },
-        { id: 'hosts', label: 'hosts', category: 'System', path: 'C:/Windows/System32/drivers/etc/hosts', desc: 'System hosts file', source: 'System' },
-        { id: 'env', label: '.env', category: 'System', path: '', desc: 'Environment variables', source: null },
+        { id: 'httpd_conf', label: 'httpd.conf', category: 'Web Server', path: '', descKey: 'configFileDescHttpd', source: null },
+        { id: 'vhosts_conf', label: 'httpd-vhosts.conf', category: 'Web Server', path: '', descKey: 'configFileDescVhosts', source: null },
+        { id: 'httpd_ssl', label: 'httpd-ssl.conf', category: 'Web Server', path: '', descKey: 'configFileDescHttpdSsl', source: null },
+        { id: 'my_ini', label: 'my.ini', category: 'Database', path: '', descKey: 'configFileDescMyIni', source: null },
+        { id: 'redis_conf', label: 'redis.conf', category: 'Database', path: '', descKey: 'configFileDescRedis', source: null },
+        { id: 'php_ini', label: 'php.ini', category: 'PHP', path: '', descKey: 'configFileDescPhpIni', source: null },
+        { id: 'hosts', label: 'hosts', category: 'System', path: 'C:/Windows/System32/drivers/etc/hosts', descKey: 'configFileDescHosts', source: 'System' },
+        { id: 'env', label: '.env', category: 'System', path: '', descKey: 'configFileDescEnv', source: null },
     ],
 
     scanSites: async () => {

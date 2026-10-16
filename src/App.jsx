@@ -27,8 +27,10 @@ const appWindow = getCurrentWindow();
 
 function App() {
   // Subscribe to the page only: the whole store changes on every poll, stats tick and log line.
-  const { activePage, initApp, recordAppIssue, checkAppUpdate } = useStore(useShallow(s => ({
+  // `locale` re-renders the title bar when the language changes.
+  const { activePage, initApp, recordAppIssue, checkAppUpdate, t } = useStore(useShallow(s => ({
     activePage: s.activePage, initApp: s.initApp, recordAppIssue: s.recordAppIssue, checkAppUpdate: s.checkAppUpdate,
+    t: s.t, locale: s.locale,
   })));
 
   useServicePoll();
@@ -82,27 +84,30 @@ function App() {
       {/* Title Bar */}
       <div className="titlebar px-4 gap-3" data-tauri-drag-region>
         <div className="titlebar-btn flex gap-2 mr-2 group/btns">
-          <div
-            className="w-3.5 h-3.5 bg-[#ff5f57] rounded-full cursor-pointer hover:brightness-90 active:brightness-75 transition-all flex items-center justify-center border border-black/10"
-            title="Đóng" onClick={handleClose}
+          <button
+            type="button"
+            className="w-3.5 h-3.5 p-0 bg-[#ff5f57] rounded-full cursor-pointer hover:brightness-90 active:brightness-75 transition-all flex items-center justify-center border border-black/10"
+            title={t('close')} aria-label={t('close')} onClick={handleClose}
           >
             <X size={8} className="text-black/60 opacity-0 group-hover/btns:opacity-100 transition-opacity" />
-          </div>
-          <div
-            className="w-3.5 h-3.5 bg-[#febc2e] rounded-full cursor-pointer hover:brightness-90 active:brightness-75 transition-all flex items-center justify-center border border-black/10"
-            title="Thu nhỏ" onClick={handleMinimize}
+          </button>
+          <button
+            type="button"
+            className="w-3.5 h-3.5 p-0 bg-[#febc2e] rounded-full cursor-pointer hover:brightness-90 active:brightness-75 transition-all flex items-center justify-center border border-black/10"
+            title={t('minimizeWindow')} aria-label={t('minimizeWindow')} onClick={handleMinimize}
           >
             <Minus size={10} className="text-black/60 opacity-0 group-hover/btns:opacity-100 transition-opacity" />
-          </div>
-          <div
-            className="w-3.5 h-3.5 bg-[#28c840] rounded-full cursor-pointer hover:brightness-90 active:brightness-75 transition-all flex items-center justify-center border border-black/10"
-            title="Phóng to / Thu nhỏ" onClick={handleMaximize}
+          </button>
+          <button
+            type="button"
+            className="w-3.5 h-3.5 p-0 bg-[#28c840] rounded-full cursor-pointer hover:brightness-90 active:brightness-75 transition-all flex items-center justify-center border border-black/10"
+            title={t('maximizeWindow')} aria-label={t('maximizeWindow')} onClick={handleMaximize}
           >
             <Maximize2 size={8} className="text-black/60 opacity-0 group-hover/btns:opacity-100 transition-opacity" />
-          </div>
+          </button>
         </div>
         <div className="flex-1 text-center text-[12px] color-[#6b7280] font-bold tracking-[0.08em] uppercase" data-tauri-drag-region>
-          DevStack — Local Dev Environment
+          {t('appTitleBar')}
         </div>
         <div className="w-16" />
       </div>

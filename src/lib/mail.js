@@ -9,20 +9,20 @@ export const mailProviders = [
   {
     id: 'mailpit',
     name: 'Mailpit',
-    tag: 'Khuyên dùng',
-    desc: 'SMTP inbox local hiện đại, có web UI, API, search, relay và release Windows binary riêng.',
+    tagKey: 'mailProviderTagMailpit',
+    descKey: 'mailProviderDescMailpit',
   },
   {
     id: 'mailhog',
     name: 'MailHog',
-    tag: 'Dự phòng cũ',
-    desc: 'Vẫn quen thuộc nhưng ít phù hợp hơn cho setup mới. Dùng khi cần tương thích với workflow cũ.',
+    tagKey: 'mailProviderTagMailhog',
+    descKey: 'mailProviderDescMailhog',
   },
   {
     id: 'mailtrap',
     name: 'Mailtrap',
-    tag: 'Cloud sandbox',
-    desc: 'Tốt cho team/staging trên cloud, nhưng không phải mail server local free chạy trực tiếp trong DevStack.',
+    tagKey: 'mailProviderTagMailtrap',
+    descKey: 'mailProviderDescMailtrap',
   },
 ];
 
