@@ -84,7 +84,7 @@ export const createPhpSlice = (set, get) => ({
     startPhp: async () => {
         const active = get().phpVersions.find(v => v.active && v.installed);
         if (!active) return false;
-        get().showToast(`PHP ${active.version} is managed via Apache module.`, 'info');
+        get().showToast(get().t('phpManagedByApache', { version: active.version }), 'info');
         return true;
     },
 
@@ -191,15 +191,15 @@ export const createPhpSlice = (set, get) => ({
 
         if (!url) {
             console.warn(`[Store] No downloadUrl found for PHP ${version}. Aborting.`);
-            get().showToast(`Không tìm thấy link tải cho PHP ${version}`, 'danger');
+            get().showToast(get().t('downloadUrlMissing', { name: `PHP ${version}` }), 'danger');
             return;
         }
 
         set(s => ({
             phpVersions: s.phpVersions.map(pv => pv.version === version ? { ...pv, installing: true, progress: 0 } : pv),
             phpInstallLogs: [
-                { t: new Date().toLocaleTimeString(), m: `Installing PHP ${version}...`, l: 'info' },
-                { t: new Date().toLocaleTimeString(), m: `Attempting URL: ${url}`, l: 'info' }
+                { t: new Date().toLocaleTimeString(), m: get().t('installingName', { name: `PHP ${version}` }), l: 'info' },
+                { t: new Date().toLocaleTimeString(), m: get().t('installDownloadUrl', { url }), l: 'info' }
             ],
             phpInstallProgress: { pct: 0, downloaded: 0, total: 0 }
         }));
@@ -239,7 +239,7 @@ export const createPhpSlice = (set, get) => ({
 
             if (result !== "SUCCESS") throw result;
             set(s => ({ phpVersions: s.phpVersions.map(pv => pv.version === version ? { ...pv, installed: true, installing: false } : pv) }));
-            get().showToast(`PHP ${version} installed`, 'ok');
+            get().showToast(get().t('versionInstalled', { name: `PHP ${version}` }), 'ok');
             // Without the CA block, curl in the new PHP fails (error 60) until the next app start.
             await get().ensurePhpCaConfig();
             if (!get().phpVersions.some(pv => pv.active && pv.installed)) await get().setActivePhp(version);
@@ -247,9 +247,9 @@ export const createPhpSlice = (set, get) => ({
             console.error('installPhpVersion error:', e);
             set(s => ({
                 phpVersions: s.phpVersions.map(pv => pv.version === version ? { ...pv, installing: false } : pv),
-                phpInstallLogs: [...s.phpInstallLogs, { t: new Date().toLocaleTimeString(), m: `Error: ${e}`, l: 'err' }]
+                phpInstallLogs: [...s.phpInstallLogs, { t: new Date().toLocaleTimeString(), m: get().t('installLogError', { error: `${e}` }), l: 'err' }]
             }));
-            get().showToast('Installation failed', 'danger');
+            get().showToast(get().t('installFailedToast'), 'danger');
         } finally {
             unlistenLogs?.();
             unlistenProgress?.();
@@ -264,8 +264,8 @@ export const createPhpSlice = (set, get) => ({
                 : [...s.phpVersions, { version, installed: false, active: false, installing: false, downloadUrl: url, threadSafe: true }]
             ).map(pv => pv.version === version ? { ...pv, installing: true, progress: 0 } : pv),
             phpInstallLogs: [
-                { t: new Date().toLocaleTimeString(), m: `Starting custom install for PHP ${version}...`, l: 'info' },
-                { t: new Date().toLocaleTimeString(), m: `Attempting URL: ${url}`, l: 'info' }
+                { t: new Date().toLocaleTimeString(), m: get().t('installingName', { name: `PHP ${version}` }), l: 'info' },
+                { t: new Date().toLocaleTimeString(), m: get().t('installDownloadUrl', { url }), l: 'info' }
             ],
             phpInstallProgress: { pct: 0, downloaded: 0, total: 0 }
         }));
@@ -310,7 +310,7 @@ export const createPhpSlice = (set, get) => ({
                     phpVersions: s.phpVersions.map(pv => pv.version === version ? { ...pv, installed: true, installing: false, progress: 100 } : pv)
                 }));
                 await get().scanInstalledPhp();
-                get().showToast(`Custom PHP ${version} installed`, 'ok');
+                get().showToast(get().t('versionInstalled', { name: `PHP ${version}` }), 'ok');
                 await get().ensurePhpCaConfig();
             } else {
                 set(s => ({ phpVersions: s.phpVersions.map(pv => pv.version === version ? { ...pv, installing: false } : pv) }));
@@ -318,7 +318,7 @@ export const createPhpSlice = (set, get) => ({
         } catch (e) {
             console.error('installCustomPhp error:', e);
             set(s => ({ phpVersions: s.phpVersions.map(pv => pv.version === version ? { ...pv, installing: false } : pv) }));
-            get().showToast(`Custom install failed: ${e}`, 'danger');
+            get().showToast(get().t('customInstallFailed', { error: `${e}` }), 'danger');
         } finally {
             unlistenLogs?.();
             unlistenProgress?.();
@@ -356,7 +356,7 @@ export const createPhpSlice = (set, get) => ({
     setActivePhp: async (version) => {
         const target = get().phpVersions.find(v => v.version === version && v.installed);
         if (!target) {
-            get().showToast(`PHP ${version} is not installed`, 'warn');
+            get().showToast(get().t('versionNotInstalled', { name: `PHP ${version}` }), 'warn');
             return;
         }
 
@@ -364,16 +364,16 @@ export const createPhpSlice = (set, get) => ({
 
         const devDir = get().settings.devStackDir.replace(/[\\\/]+$/, '');
         const phpDir = getPhpDir(get(), target);
-        get().addServiceLog?.('php', `Switching PHP runtime to ${version}...`, 'info');
+        get().addServiceLog?.('php', get().t('phpLogSwitching', { version }), 'info');
 
         try {
             const { invoke } = await import('@tauri-apps/api/core');
-            get().showToast(`Đang thiết lập PHP ${version}...`, 'info');
-            get().addServiceLog?.('php', `Patching php.ini for PHP ${version}...`, 'info');
+            get().showToast(get().t('phpSettingUp', { version }), 'info');
+            get().addServiceLog?.('php', get().t('phpLogPatchingIni', { version }), 'info');
             await invoke('patch_php_ini_extensions', {
                 iniPath: `${phpDir}/php.ini`.replace(/\//g, '\\')
             });
-            get().addServiceLog?.('php', `Updating Windows PATH for PHP ${version}...`, 'info');
+            get().addServiceLog?.('php', get().t('phpLogUpdatingPath', { version }), 'info');
             await invoke('set_php_global_path', {
                 baseDir: devDir.replace(/\//g, '\\'),
                 phpDir: phpDir.replace(/\//g, '\\')
@@ -381,11 +381,11 @@ export const createPhpSlice = (set, get) => ({
         } catch (e) {
             console.error('Failed to update PHP environment', e);
             const message = String(e || '');
-            get().addServiceLog?.('php', `Failed to switch PHP ${version}: ${message}`, 'err');
+            get().addServiceLog?.('php', get().t('phpLogSwitchFailed', { version, error: message }), 'err');
             if (message.includes('Machine PATH') || message.includes('Administrator')) {
-                get().showToast('System PATH đang có PHP cũ. Hãy chạy DevStack bằng Administrator rồi đổi PHP lại.', 'warn');
+                get().showToast(get().t('phpSystemPathAdmin'), 'warn');
             } else {
-                get().showToast(`Không thể cập nhật PHP PATH: ${message}`, 'warn');
+                get().showToast(get().t('phpPathUpdateFailed', { error: message }), 'warn');
             }
             set({ activatingPhp: null });
             return;
@@ -397,11 +397,11 @@ export const createPhpSlice = (set, get) => ({
 
         const activeApache = get().apacheVersions.find(a => a.active && a.installed);
         if (activeApache) {
-            get().addServiceLog?.('php', `Rebinding Apache ${activeApache.version} to PHP ${version}...`, 'info');
+            get().addServiceLog?.('php', get().t('phpLogRebinding', { apache: activeApache.version, version }), 'info');
             await get().configureApachePhp(version, activeApache.version);
             const web = get().services.find(s => s.type === 'web');
             if (web?.status === 'running' || web?.pid) {
-                get().addServiceLog?.('php', `Restarting Apache to load PHP ${version}...`, 'warn');
+                get().addServiceLog?.('php', get().t('phpLogRestartingApache', { version }), 'warn');
                 await get().restartApache();
             }
         }
@@ -409,8 +409,8 @@ export const createPhpSlice = (set, get) => ({
         set({ activatingPhp: null });
         await get().detectPhpVersion();
         await get().syncExtensionsFromActivePhp();
-        get().addServiceLog?.('php', `PHP ${version} activated successfully.`, 'ok');
-        get().showToast(`PHP ${version} activated`, 'ok');
+        get().addServiceLog?.('php', get().t('versionActivated', { name: `PHP ${version}` }), 'ok');
+        get().showToast(get().t('versionActivated', { name: `PHP ${version}` }), 'ok');
     },
 
     fixPhpConflict: async (forceGlobal = false) => {
@@ -418,13 +418,13 @@ export const createPhpSlice = (set, get) => ({
             const { invoke } = await import('@tauri-apps/api/core');
             const active = get().phpVersions.find(v => v.active && v.installed) || get().phpVersions.find(v => v.installed);
             if (!active) {
-                get().showToast('Chưa có PHP DevStack nào được cài để đưa vào PATH.', 'warn');
+                get().showToast(get().t('phpPathNoInstall'), 'warn');
                 return;
             }
 
             const elevated = await invoke('is_app_elevated');
             if (forceGlobal && !elevated) {
-                get().showToast('DevStack cần chạy bằng Administrator để sửa System PATH.', 'warn');
+                get().showToast(get().t('phpPathNeedsAdmin'), 'warn');
                 await invoke('relaunch_as_admin');
                 return;
             }
@@ -436,10 +436,10 @@ export const createPhpSlice = (set, get) => ({
                 phpDir: phpDir.replace(/\//g, '\\')
             });
             await get().detectPhpVersion();
-            get().showToast('Đã cập nhật PHP PATH. Hãy mở terminal mới để kiểm tra lại.', 'ok');
+            get().showToast(get().t('phpPathUpdated'), 'ok');
         } catch (e) {
             console.error('fixPhpConflict error:', e);
-            get().showToast(`Không thể sửa PHP PATH: ${e}`, 'danger');
+            get().showToast(get().t('phpPathUpdateFailed', { error: `${e}` }), 'danger');
         }
     },
 
@@ -510,14 +510,14 @@ export const createPhpSlice = (set, get) => ({
             const { invoke } = await import('@tauri-apps/api/core');
             const ok = await invoke('disable_php_extension', { iniPath, ext });
             if (!ok) {
-                get().showToast(`Failed to disable ${ext}`, 'warn');
+                get().showToast(get().t('extensionDisableFailed', { ext }), 'warn');
                 return;
             }
             await get().syncExtensionsFromActivePhp();
-            get().showToast(`Extension ${ext} disabled`, 'ok');
+            get().showToast(get().t('extensionDisabled', { ext }), 'ok');
         } catch (e) {
             console.error('removeExtension failed:', e);
-            get().showToast(`Failed to disable ${ext}`, 'danger');
+            get().showToast(get().t('extensionDisableFailed', { ext }), 'danger');
         }
     },
 
@@ -594,7 +594,7 @@ export const createPhpSlice = (set, get) => ({
             const ok = await invoke('patch_php_ini_extensions', { iniPath });
             if (ok) {
                 await get().syncExtensionsFromActivePhp();
-                get().showToast(`PHP ${version} extensions enabled`, 'ok');
+                get().showToast(get().t('phpExtensionsEnabled', { version }), 'ok');
             }
         } catch (e) { console.error('patchPhpIni failed:', e); }
     }

@@ -96,7 +96,7 @@ export const createMysqlSlice = (set, get) => ({
 
         set(s => ({
             mysqlVersions: s.mysqlVersions.map(mv => mv.version === version ? { ...mv, installing: true, progress: 0 } : mv),
-            mysqlInstallLogs: [{ t: new Date().toLocaleTimeString(), m: `Installing MySQL ${version}...`, l: 'info' }]
+            mysqlInstallLogs: [{ t: new Date().toLocaleTimeString(), m: get().t('installingName', { name: `MySQL ${version}` }), l: 'info' }]
         }));
 
         const devDir = get().settings.devStackDir.replace(/\\/g, '/');
@@ -129,15 +129,15 @@ export const createMysqlSlice = (set, get) => ({
 
             if (result !== "SUCCESS") throw result;
             set(s => ({ mysqlVersions: s.mysqlVersions.map(mv => mv.version === version ? { ...mv, installed: true, installing: false } : mv) }));
-            get().showToast(`MySQL ${version} installed`, 'ok');
+            get().showToast(get().t('versionInstalled', { name: `MySQL ${version}` }), 'ok');
             if (!get().mysqlVersions.some(mv => mv.active && mv.installed)) await get().setActiveMysql(version);
         } catch (e) {
             console.error('installMysqlVersion error:', e);
             set(s => ({
                 mysqlVersions: s.mysqlVersions.map(mv => mv.version === version ? { ...mv, installing: false } : mv),
-                mysqlInstallLogs: [...s.mysqlInstallLogs, { t: new Date().toLocaleTimeString(), m: `Error: ${e}`, l: 'err' }]
+                mysqlInstallLogs: [...s.mysqlInstallLogs, { t: new Date().toLocaleTimeString(), m: get().t('installLogError', { error: `${e}` }), l: 'err' }]
             }));
-            get().showToast('Installation failed', 'danger');
+            get().showToast(get().t('installFailedToast'), 'danger');
         } finally {
             unlisteners.forEach(un => un());
         }
@@ -168,17 +168,17 @@ export const createMysqlSlice = (set, get) => ({
     setActiveMysql: async (version) => {
         const target = get().mysqlVersions.find(v => v.version === version && v.installed);
         if (!target) {
-            get().showToast(`MySQL ${version} chưa được cài đặt`, 'warn');
+            get().showToast(get().t('versionNotInstalled', { name: `MySQL ${version}` }), 'warn');
             return;
         }
 
         const mysqlSvc = get().services.find(s => s.type === 'db');
         const wasRunning = mysqlSvc?.status === 'running' || !!mysqlSvc?.pid;
-        get().addServiceLog?.('mysql', `Switching MySQL default version to ${version}...`, 'info');
+        get().addServiceLog?.('mysql', get().t('mysqlSwitching', { version }), 'info');
 
         if (wasRunning && mysqlSvc) {
-            get().showToast(`Đang đổi MySQL sang ${version}...`, 'info');
-            get().addServiceLog?.('mysql', `Stopping current MySQL before switching to ${version}...`, 'warn');
+            get().showToast(get().t('mysqlSwitching', { version }), 'info');
+            get().addServiceLog?.('mysql', get().t('mysqlLogStoppingCurrent', { version }), 'warn');
             // The old mysqld would keep :3306 and the new version could not start.
             if (!(await get().toggleService(mysqlSvc.id, 'stop'))) return;
         }
@@ -189,14 +189,14 @@ export const createMysqlSlice = (set, get) => ({
         }));
 
         if (wasRunning && mysqlSvc) {
-            get().addServiceLog?.('mysql', `Starting MySQL ${version}...`, 'info');
+            get().addServiceLog?.('mysql', get().t('startingMysql', { version }), 'info');
             await get().toggleService(mysqlSvc.id, 'start');
             await get().checkServicesRunning();
-            get().addServiceLog?.('mysql', `MySQL ${version} is now active.`, 'ok');
-            get().showToast(`Đã đổi và khởi động lại MySQL ${version}`, 'ok');
+            get().addServiceLog?.('mysql', get().t('mysqlSwitchedRestarted', { version }), 'ok');
+            get().showToast(get().t('mysqlSwitchedRestarted', { version }), 'ok');
         } else {
-            get().addServiceLog?.('mysql', `MySQL ${version} selected as default.`, 'ok');
-            get().showToast(`Đã chọn MySQL ${version} làm mặc định`, 'ok');
+            get().addServiceLog?.('mysql', get().t('mysqlSelectedDefault', { version }), 'ok');
+            get().showToast(get().t('mysqlSelectedDefault', { version }), 'ok');
             await get().checkServicesRunning();
         }
     },
@@ -384,7 +384,7 @@ export const createMysqlSlice = (set, get) => ({
     },
 
     repairMysqlFromLaragon: async (version) => {
-        const { showToast, settings } = get();
+        const { showToast, t } = get();
         const mysqlDir = getMysqlDir(get(), version).replace(/\//g, '\\');
         const iniPath = `${mysqlDir}\\my.ini`;
 
@@ -394,13 +394,13 @@ export const createMysqlSlice = (set, get) => ({
             const dataDir = `${mysqlDir}\\data`.replace(/\\/g, '/');
             const updated = await invoke('update_ini_value', { filePath: iniPath, key: 'datadir', value: dataDir });
             if (updated) {
-                showToast('MySQL path fixed. Please Start again.', 'ok');
+                showToast(t('mysqlPathFixed'), 'ok');
             } else {
-                showToast('my.ini not found in version folder', 'warn');
+                showToast(t('mysqlIniNotFound'), 'warn');
             }
         } catch (e) {
             console.error('Repair MySQL error:', e);
-            showToast('Failed to fix MySQL driver', 'danger');
+            showToast(t('mysqlFixFailed'), 'danger');
         }
     }
 });

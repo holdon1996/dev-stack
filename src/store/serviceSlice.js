@@ -92,7 +92,7 @@ export const createServiceSlice = (set, get) => ({
             const { invoke } = await import('@tauri-apps/api/core');
             const installed = await invoke('path_exists', { path: mailpitExe });
             if (!installed) {
-                get().showToast('Hãy cài Mailpit trong trang Mail Server trước.', 'warn');
+                get().showToast(get().t('mailpitInstallFirst'), 'warn');
                 return false;
             }
 
@@ -103,7 +103,7 @@ export const createServiceSlice = (set, get) => ({
             return !!ok;
         } catch (e) {
             console.error('startMailpit failed:', e);
-            get().showToast(`Không start được Mailpit: ${e}`, 'danger');
+            get().showToast(get().t('mailpitStartFailed', { error: `${e}` }), 'danger');
             return false;
         }
     },
@@ -349,17 +349,17 @@ export const createServiceSlice = (set, get) => ({
                             : svc
                     )
                 }));
-                get().showToast(`Successfully killed process on port ${port}`, 'ok');
+                get().showToast(get().t('portKilled', { port }), 'ok');
                 await new Promise(r => setTimeout(r, 350));
                 await get().checkServicesRunning();
                 await new Promise(r => setTimeout(r, 350));
                 await get().checkServicesRunning();
                 const svc = get().services.find(s => parseInt(s.port) === parseInt(port));
                 if (svc?.portConflict) {
-                    get().showToast(`Port ${port} is still in use after kill attempt.`, 'warn');
+                    get().showToast(get().t('portStillBusy', { port }), 'warn');
                 }
             } else {
-                get().showToast(`Requesting Admin rights to kill process on port ${port}...`, 'info');
+                get().showToast(get().t('portKillRequestingAdmin', { port }), 'info');
                 const elevated = await invoke('kill_process_by_port_admin', { port: parseInt(port) });
                 await new Promise(r => setTimeout(r, 500));
                 await get().checkServicesRunning();
@@ -376,13 +376,13 @@ export const createServiceSlice = (set, get) => ({
                                 : item
                         )
                     }));
-                    get().showToast(`Successfully killed process on port ${port} with Admin rights.`, 'ok');
+                    get().showToast(get().t('portKilledAdmin', { port }), 'ok');
                 } else {
-                    get().showToast(`Could not kill process on port ${port}, even with Admin rights.`, 'danger');
+                    get().showToast(get().t('portKillFailedAdmin', { port }), 'danger');
                 }
             }
         } catch {
-            get().showToast('Failed to kill process - might need Admin rights', 'danger');
+            get().showToast(get().t('portKillFailed'), 'danger');
         }
     },
 
@@ -433,7 +433,7 @@ export const createServiceSlice = (set, get) => ({
 
         if (action === 'restart') {
             const isRunning = svc.status === 'running' || svc.pid;
-            get().showToast(get().t('restarting', { name: svc.name }) || `Restarting ${svc.name}...`, 'info', { key: `svc:${id}` });
+            get().showToast(get().t('restarting', { name: svc.name }), 'info', { key: `svc:${id}` });
             if (isRunning) {
                 if (!(await get()._toggleService(id, 'stop'))) return false;
                 await new Promise(r => setTimeout(r, 500));
@@ -456,8 +456,8 @@ export const createServiceSlice = (set, get) => ({
         console.log(`[Timer] Toggle clicked for ${svc.name} - Action: ${shouldStop ? 'STOP' : 'START'}`);
 
         if (shouldStop) {
-            get().showToast(`Stopping ${svcLabel}...`, 'info', { key: `svc:${id}` });
-            get().addServiceLog(logType, `Stopping ${svcLabel} ...`, 'warn');
+            get().showToast(get().t('serviceStopping', { name: svcLabel }), 'info', { key: `svc:${id}` });
+            get().addServiceLog(logType, get().t('serviceStopping', { name: svcLabel }), 'warn');
             set(s => ({ services: s.services.map(sv => sv.id === id ? { ...sv, status: 'stopping' } : sv) }));
 
             const name = svc.type === 'web' ? 'httpd.exe' : svc.type === 'db' ? 'mysqld.exe' : svc.type === 'cache' ? 'redis-server.exe' : svc.type === 'mail' ? 'mailpit.exe' : svc.type === 'storage' ? 'minio.exe' : 'php-cgi.exe';
@@ -483,8 +483,8 @@ export const createServiceSlice = (set, get) => ({
             if (success) {
                 // Only now: if httpd survived (UAC declined), its sites must keep their PHP.
                 if (svc.type === 'web') await get().stopFcgiPools();
-                get().showToast(`${svcLabel} stopped.`, 'ok', { key: `svc:${id}` });
-                get().addServiceLog(logType, `${svcLabel} stopped successfully.`, 'ok');
+                get().showToast(get().t('serviceStoppedToast', { name: svcLabel }), 'ok', { key: `svc:${id}` });
+                get().addServiceLog(logType, get().t('serviceStoppedToast', { name: svcLabel }), 'ok');
             } else {
                 get().showToast(get().t('stopFailed', { name: svcLabel }), 'danger', { key: `svc:${id}` });
                 get().addServiceLog(logType, get().t('stopFailed', { name: svcLabel }), 'err');
@@ -504,8 +504,8 @@ export const createServiceSlice = (set, get) => ({
                 set(s => ({ services: s.services.map(sv => sv.id === id ? { ...sv, portConflict: true, portOwner: owner } : sv) }));
                 return false;
             }
-            get().showToast(`Starting ${svcLabel}...`, 'info', { key: `svc:${id}` });
-            get().addServiceLog(logType, `Starting ${svcLabel}...`, 'info');
+            get().showToast(get().t('serviceStarting', { name: svcLabel }), 'info', { key: `svc:${id}` });
+            get().addServiceLog(logType, get().t('serviceStarting', { name: svcLabel }), 'info');
             set(s => ({ services: s.services.map(sv => sv.id === id ? { ...sv, status: 'starting' } : sv) }));
 
             let started = true;
@@ -521,7 +521,7 @@ export const createServiceSlice = (set, get) => ({
             console.log(`[Timer] Native Rust spawn done in ${(performance.now() - t1).toFixed(2)}ms`);
 
             if (started === false) {
-                get().addServiceLog(logType, `${svcLabel} failed to start.`, 'err');
+                get().addServiceLog(logType, get().t('serviceStartFailedLog', { name: svcLabel }), 'err');
                 set(s => ({ services: s.services.map(sv => sv.id === id ? { ...sv, status: 'stopped' } : sv) }));
                 return false;
             }
@@ -532,8 +532,8 @@ export const createServiceSlice = (set, get) => ({
 
             if (success) {
                 const finalPid = get().services.find(s => s.id === id)?.pid || 'Unknown';
-                get().showToast(`${svcLabel} is running.`, 'ok', { key: `svc:${id}` });
-                get().addServiceLog(logType, `${svcLabel} started successfully. PID: ${finalPid}`, 'ok');
+                get().showToast(get().t('serviceRunningToast', { name: svcLabel }), 'ok', { key: `svc:${id}` });
+                get().addServiceLog(logType, get().t('serviceStartedLog', { name: svcLabel, pid: finalPid }), 'ok');
             } else {
                 // No process left: it exited on startup (bad config, missing DLL, port taken).
                 const alive = !!get().services.find(s => s.id === id)?.pid;
@@ -834,7 +834,7 @@ export const createServiceSlice = (set, get) => ({
                 const exists = await invoke('path_exists', { path: normalizedPath });
 
                 if (!exists) {
-                    get().addServiceLog(type, `Log file not found at: ${normalizedPath}`, 'warn');
+                    get().addServiceLog(type, get().t('logFileNotFoundAt', { path: normalizedPath }), 'warn');
                     return;
                 }
 
@@ -850,7 +850,7 @@ export const createServiceSlice = (set, get) => ({
             }
         } catch (e) {
             console.error('fetchServiceLogs failed', e);
-            get().addServiceLog(type, `Failed to load logs: ${e.message || e}`, 'err');
+            get().addServiceLog(type, get().t('logLoadFailed', { error: e.message || `${e}` }), 'err');
         }
     },
 
@@ -903,7 +903,7 @@ export const createServiceSlice = (set, get) => ({
                 const exists = await invoke('path_exists', { path: normalizedPath });
 
                 if (!exists) {
-                    addServiceLog(type, `Log file not yet created — start the service first to generate logs.`, 'warn');
+                    addServiceLog(type, get().t('logFileNotCreated'), 'warn');
                     return;
                 }
 
@@ -941,7 +941,7 @@ export const createServiceSlice = (set, get) => ({
             }
         } catch (e) {
             console.error(`Stream ${type} failed`, e);
-            addServiceLog(type, `Streaming failed: ${e.message || e}`, 'err');
+            addServiceLog(type, get().t('logStreamFailed', { error: e.message || `${e}` }), 'err');
         } finally {
             // No stream started (no log file yet, no active version, error): free the slot
             // so the next tab switch tries again.

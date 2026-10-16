@@ -179,7 +179,7 @@ export const createApacheSlice = (set, get) => ({
         // install) must not start a second httpd.
         const web = get().services.find(s => s.type === 'web');
         if (web?.status === 'running' || web?.pid) await get().restartApache();
-        get().showToast(`Apache ${version} activated`, 'ok');
+        get().showToast(get().t('versionActivated', { name: `Apache ${version}` }), 'ok');
     },
 
     /** Runs `httpd -t`; on failure logs the output and returns false. */
@@ -230,11 +230,11 @@ export const createApacheSlice = (set, get) => ({
 
     installApacheVersion: async (version) => {
         const v = get().apacheVersions.find(av => av.version === version);
-        if (!v?.downloadUrl) return get().showToast('Download URL not found', 'danger');
+        if (!v?.downloadUrl) return get().showToast(get().t('downloadUrlMissing', { name: `Apache ${version}` }), 'danger');
 
         set(s => ({
             apacheVersions: s.apacheVersions.map(av => av.version === version ? { ...av, installing: true, progress: 0 } : av),
-            apacheInstallLogs: [{ t: new Date().toLocaleTimeString(), m: `Installing Apache ${version}...`, l: 'info' }]
+            apacheInstallLogs: [{ t: new Date().toLocaleTimeString(), m: get().t('installingName', { name: `Apache ${version}` }), l: 'info' }]
         }));
 
         const devDir = get().settings.devStackDir.replace(/\\/g, '/');
@@ -267,16 +267,16 @@ export const createApacheSlice = (set, get) => ({
 
             if (result !== "SUCCESS") throw result;
             set(s => ({ apacheVersions: s.apacheVersions.map(av => av.version === version ? { ...av, installed: true, installing: false } : av) }));
-            get().showToast(`Apache ${version} installed`, 'ok');
+            get().showToast(get().t('versionInstalled', { name: `Apache ${version}` }), 'ok');
             // First install: activate it so Start works right away.
             if (!get().apacheVersions.some(av => av.active && av.installed)) await get().setActiveApache(version);
         } catch (e) {
             console.error('installApacheVersion error:', e);
             set(s => ({
                 apacheVersions: s.apacheVersions.map(av => av.version === version ? { ...av, installing: false } : av),
-                apacheInstallLogs: [...s.apacheInstallLogs, { t: new Date().toLocaleTimeString(), m: `Error: ${e}`, l: 'err' }]
+                apacheInstallLogs: [...s.apacheInstallLogs, { t: new Date().toLocaleTimeString(), m: get().t('installLogError', { error: `${e}` }), l: 'err' }]
             }));
-            get().showToast('Installation failed', 'danger');
+            get().showToast(get().t('installFailedToast'), 'danger');
         } finally {
             unlisteners.forEach(un => un());
         }

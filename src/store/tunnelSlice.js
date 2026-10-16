@@ -120,15 +120,15 @@ export const createTunnelSlice = (set, get) => ({
         const devDir = get().settings.devStackDir.replace(/\//g, '\\').replace(/[\\]+$/, '');
         const executable = `${devDir}\\bin\\tunnels\\cloudflared.exe`;
         set({ cloudflareAuthStatus: 'connecting' });
-        get().addTunnelLog('Opening Cloudflare authorization...', 'info');
+        get().addTunnelLog(get().t('cloudflareAuthorizing'), 'info');
 
         try {
             const { invoke } = await import('@tauri-apps/api/core');
             await invoke('cloudflare_login', { executable });
             set({ cloudflareAuthStatus: 'connected' });
-            get().addTunnelLog('✓ Cloudflare account connected.', 'ok');
+            get().addTunnelLog(`✓ ${get().t('cloudflareConnectedLog')}`, 'ok');
         } catch (error) {
-            const message = error?.message || error?.toString?.() || 'Cloudflare login failed';
+            const message = error?.message || error?.toString?.() || get().t('cloudflareLoginFailed');
             set({ cloudflareAuthStatus: 'disconnected' });
             get().addTunnelLog(`❌ ${message}`, 'err');
         }
@@ -143,7 +143,7 @@ export const createTunnelSlice = (set, get) => ({
             await invoke('kill_process_by_name_exact', { name: exeName });
 
             set({ tunnelStatus: 'stopped', tunnelPublicUrl: '' });
-            get().addTunnelLog('Tunnel disconnected.', 'warn');
+            get().addTunnelLog(get().t('tunnelDisconnected'), 'warn');
         } catch (e) {
             console.error('Stop tunnel failed:', e);
         }
@@ -164,7 +164,7 @@ export const createTunnelSlice = (set, get) => ({
         if (hostHeader !== tunnelHostHeader) set({ tunnelHostHeader: hostHeader });
         const isCustomCloudflare = tunnelProvider === 'cloudflare' && tunnelMode === 'custom';
         if (isCustomCloudflare && (!hostHeader || !tunnelCustomDomain.trim() || !tunnelCustomName.trim())) {
-            get().addTunnelLog('Select a project, tunnel name, and custom domain first.', 'warn');
+            get().addTunnelLog(t('tunnelCustomMissing'), 'warn');
             return;
         }
         const hostname = tunnelCustomDomain.trim().toLowerCase();
@@ -183,7 +183,7 @@ export const createTunnelSlice = (set, get) => ({
         const targetDesc = isCustomCloudflare
             ? `${tunnelCustomDomain.trim()} → ${hostHeader}`
             : hostHeader || `${originScheme}://localhost:${tunnelPort}`;
-        get().addTunnelLog(`Starting ${tunnelProvider} on ${targetDesc}...`, 'info');
+        get().addTunnelLog(t('tunnelStarting', { provider: tunnelProvider, target: targetDesc }), 'info');
 
         const devDir = get().settings.devStackDir.replace(/\//g, '\\').replace(/[\\]+$/, '');
         const exePath = `${devDir}\\bin\\tunnels\\${tunnelProvider === 'cloudflare' ? 'cloudflared' : tunnelProvider}.exe`;
@@ -208,7 +208,7 @@ export const createTunnelSlice = (set, get) => ({
                 const ngrokStdoutMatch = l.match(/url=(https:\/\/[^\s]+)/);
                 if (ngrokStdoutMatch && get().tunnelStatus === 'starting') {
                     set({ tunnelStatus: 'running', tunnelPublicUrl: ngrokStdoutMatch[1] });
-                    get().addTunnelLog(`✓ Tunnel established: ${ngrokStdoutMatch[1]}`, 'ok');
+                    get().addTunnelLog(`✓ ${t('tunnelEstablished', { url: ngrokStdoutMatch[1] })}`, 'ok');
                 }
             });
 
@@ -221,7 +221,7 @@ export const createTunnelSlice = (set, get) => ({
                 const match = l.match(/https:\/\/[a-zA-Z0-9-]+\.trycloudflare\.com/);
                 if (match && get().tunnelStatus === 'starting') {
                     set({ tunnelStatus: 'running', tunnelPublicUrl: match[0] });
-                    get().addTunnelLog(`✓ Tunnel established: ${match[0]}`, 'ok');
+                    get().addTunnelLog(`✓ ${t('tunnelEstablished', { url: match[0] })}`, 'ok');
                     get().probeTunnel(match[0]);
                 }
 
@@ -229,7 +229,7 @@ export const createTunnelSlice = (set, get) => ({
                 const ngrokMatch = l.match(/url=(https:\/\/[^\s]+)/);
                 if (ngrokMatch && get().tunnelStatus === 'starting') {
                     set({ tunnelStatus: 'running', tunnelPublicUrl: ngrokMatch[1] });
-                    get().addTunnelLog(`✓ Tunnel established: ${ngrokMatch[1]}`, 'ok');
+                    get().addTunnelLog(`✓ ${t('tunnelEstablished', { url: ngrokMatch[1] })}`, 'ok');
                 }
             });
 
@@ -237,7 +237,7 @@ export const createTunnelSlice = (set, get) => ({
                 const code = event.payload;
                 if (get().tunnelStatus !== 'stopped') {
                     set({ tunnelStatus: 'stopped' });
-                    get().addTunnelLog(`Tunnel closed with code ${code}`, 'warn');
+                    get().addTunnelLog(t('tunnelClosedCode', { code }), 'warn');
                 }
             });
 
@@ -259,7 +259,7 @@ export const createTunnelSlice = (set, get) => ({
                     });
                     set({ tunnelRoutes: routes, tunnelPublicUrl: `https://${hostname}` });
                     args = ['tunnel', '--config', prepared.configPath, 'run', prepared.tunnelName];
-                    get().addTunnelLog(`Using config: ${prepared.configPath} (${prepared.publicUrls.join(', ')})`, 'info');
+                    get().addTunnelLog(t('tunnelUsingConfig', { path: prepared.configPath, urls: prepared.publicUrls.join(', ') }), 'info');
                     for (const dns of prepared.dnsRoutesUpdated) {
                         get().addTunnelLog(t('tunnelDnsRouted', { hostname: dns }), 'warn');
                     }
@@ -289,14 +289,14 @@ export const createTunnelSlice = (set, get) => ({
 
             if (isCustomCloudflare) {
                 set({ tunnelStatus: 'running' });
-                get().addTunnelLog(`✓ Tunnel established: https://${hostname}`, 'ok');
+                get().addTunnelLog(`✓ ${t('tunnelEstablished', { url: `https://${hostname}` })}`, 'ok');
                 get().probeTunnel(`https://${hostname}`);
             }
 
         } catch (e) {
 
-            const errMsg = e?.message || e?.toString() || 'Unknown error';
-            get().addTunnelLog(`❌ ERROR: ${errMsg}`, 'err');
+            const errMsg = e?.message || e?.toString() || t('unknownError');
+            get().addTunnelLog(`❌ ${t('installLogError', { error: errMsg })}`, 'err');
             console.error('startTunnel failed:', e, 'Path:', exePath);
             set({ tunnelStatus: 'stopped' });
         }
@@ -310,7 +310,7 @@ export const createTunnelSlice = (set, get) => ({
             const exeName = provider === 'cloudflare' ? 'cloudflared.exe' : `${provider}.exe`;
 
             set({ tunnelStatus: 'installing', tunnelInstallProgress: { pct: 0, downloaded: 0, total: 0 } });
-            get().addTunnelLog(`Downloading ${provider}...`);
+            get().addTunnelLog(get().t('tunnelLogDownloading', { name: provider }));
 
             let downloadUrl = '';
             if (provider === 'cloudflare') {
@@ -320,7 +320,7 @@ export const createTunnelSlice = (set, get) => ({
             }
 
             if (!downloadUrl) {
-                get().addTunnelLog(`❌ No download link for ${provider}`, 'err');
+                get().addTunnelLog(`❌ ${get().t('downloadUrlMissing', { name: provider })}`, 'err');
                 set({ tunnelStatus: 'stopped' });
                 return;
             }
@@ -340,8 +340,8 @@ export const createTunnelSlice = (set, get) => ({
                 unlisten = await listen('tunnel-install-log', (event) => {
                     get().addTunnelLog(event.payload, 'info');
                 });
-                get().addTunnelLog(`Download URL: ${downloadUrl}`, 'info');
-                get().addTunnelLog('Downloading standalone cloudflared.exe...', 'info');
+                get().addTunnelLog(get().t('installDownloadUrl', { url: downloadUrl }), 'info');
+                get().addTunnelLog(get().t('tunnelLogDownloading', { name: 'cloudflared.exe' }), 'info');
                 await invoke('download_file_with_progress', {
                     svcType: 'tunnel',
                     label: 'cloudflared.exe',
@@ -353,7 +353,7 @@ export const createTunnelSlice = (set, get) => ({
                 unlisten = await listen('tunnel-install-log', (event) => {
                     get().addTunnelLog(event.payload, 'info');
                 });
-                get().addTunnelLog(`Download URL: ${downloadUrl}`, 'info');
+                get().addTunnelLog(get().t('installDownloadUrl', { url: downloadUrl }), 'info');
 
                 // ZIP-based installers such as ngrok still go through the generic extractor.
                 result = await invoke('install_binary', {
@@ -374,14 +374,14 @@ export const createTunnelSlice = (set, get) => ({
                     tunnelInstalled: { ...s.tunnelInstalled, [provider]: true },
                     tunnelInstallProgress: { pct: 100, downloaded: s.tunnelInstallProgress.downloaded, total: s.tunnelInstallProgress.total }
                 }));
-                get().addTunnelLog(`✓ ${provider} installed successfully!`, 'ok');
-                get().showToast(`${provider} installed!`, 'ok');
+                get().addTunnelLog(`✓ ${get().t('versionInstalled', { name: provider })}`, 'ok');
+                get().showToast(get().t('versionInstalled', { name: provider }), 'ok');
             }
         } catch (e) {
             set({ tunnelStatus: 'stopped' });
-            const errMsg = e?.message || e?.toString?.() || 'Unknown error';
-            get().addTunnelLog(`❌ ERROR: ${errMsg}`, 'err');
-            get().showToast(`Install failed`, 'warn');
+            const errMsg = e?.message || e?.toString?.() || get().t('unknownError');
+            get().addTunnelLog(`❌ ${get().t('installLogError', { error: errMsg })}`, 'err');
+            get().showToast(get().t('installFailedToast'), 'warn');
         }
     }
 });

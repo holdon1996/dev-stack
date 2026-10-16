@@ -86,9 +86,9 @@ export const createConfigSlice = (set, get) => ({
 
         // Auto rescan and patch if critical paths change
         if (key === 'devStackDir' || key === 'rootPath') {
-            const { initApp, showToast, stopAll, addServiceLog } = get();
-            showToast('Đang chuyển đổi thư mục cài đặt...', 'info');
-            addServiceLog('apache', `📁 Thư mục làm việc thay đổi sang: ${value}`, 'info');
+            const { initApp, showToast, stopAll, addServiceLog, t } = get();
+            showToast(t('dirSwitching'), 'info');
+            addServiceLog('apache', `📁 ${t('dirChangedLog', { path: value })}`, 'info');
 
             // 1. Stop all current services to avoid file locks
             stopAll().finally(async () => {
@@ -110,7 +110,7 @@ export const createConfigSlice = (set, get) => ({
                     const activeApache = get().apacheVersions.find(v => v.active && v.installed) || get().apacheVersions.find(v => v.installed);
                     if (activeApache) {
                         const serverRoot = `${dsDir}/bin/apache/apache-${activeApache.version}`;
-                        addServiceLog('apache', `🛠 Đang đồng bộ Apache config tại ${serverRoot}...`, 'info');
+                        addServiceLog('apache', `🛠 ${t('syncingApacheConfig', { path: serverRoot })}`, 'info');
                         await invoke('patch_apache_paths', { newServerRoot: serverRoot, newDocRoot: docRoot, port: parseInt(get().settings.port80) || 80 });
                     }
 
@@ -119,7 +119,7 @@ export const createConfigSlice = (set, get) => ({
                     if (activeMysql) {
                         const mysqlRoot = `${dsDir}/bin/mysql/mysql-${activeMysql.version}`;
                         const iniPath = `${mysqlRoot}/my.ini`.replace(/\//g, '\\');
-                        addServiceLog('mysql', `🛠 Đang đồng bộ MySQL config tại ${mysqlRoot}...`, 'info');
+                        addServiceLog('mysql', `🛠 ${t('syncingMysqlConfig', { path: mysqlRoot })}`, 'info');
                         await invoke('patch_mysql_paths', {
                             iniPath,
                             newMysqlRoot: mysqlRoot,
@@ -130,11 +130,11 @@ export const createConfigSlice = (set, get) => ({
                     // 5. Re-init app and restart auto-services
                     set({ portConflicts: {} });
                     setTimeout(() => initApp(), 1000);
-                    showToast('Đồng bộ cấu hình hoàn tất', 'ok');
+                    showToast(t('configSyncDone'), 'ok');
                 } catch (e) {
                     console.error("Path synchronization failed:", e);
-                    showToast('Lỗi khi đồng bộ cấu hình', 'danger');
-                    addServiceLog('apache', `❌ Lỗi đồng bộ: ${e}`, 'err');
+                    showToast(t('configSyncFailed'), 'danger');
+                    addServiceLog('apache', `❌ ${t('configSyncFailedLog', { error: `${e}` })}`, 'err');
                 }
             });
         }
@@ -175,7 +175,7 @@ export const createConfigSlice = (set, get) => ({
     browseForFile: async (id) => {
         try {
             const { open } = await import('@tauri-apps/plugin-dialog');
-            const selected = await open({ multiple: false, title: 'Select Config File' });
+            const selected = await open({ multiple: false, title: get().t('selectConfigFile') });
             if (selected) {
                 get().updateConfigPath(id, selected);
             }
@@ -243,7 +243,7 @@ export const createConfigSlice = (set, get) => ({
             }
 
             if (isAdmin) {
-                get().showToast('Mở file hosts bằng quyền Admin...', 'info');
+                get().showToast(get().t('hostsOpeningAdmin'), 'info');
             }
 
             await invoke('open_file_default', {
@@ -254,7 +254,7 @@ export const createConfigSlice = (set, get) => ({
 
         } catch (e) {
             console.error('openConfigFile error:', e);
-            get().showToast('Failed to open file', 'danger');
+            get().showToast(get().t('openFileFailed', { error: `${e}` }), 'danger');
         }
     },
 

@@ -72,8 +72,8 @@ export const createNodeSlice = (set, get) => ({
                 ? s.nodeVersions.map(v => v.version === version ? { ...v, installing: true, progress: 0 } : v)
                 : [{ version, installed: false, active: false, installing: true, progress: 0, path: destDir }, ...s.nodeVersions],
             nodeInstallLogs: [
-                { t: new Date().toLocaleTimeString(), m: `Installing Node.js ${version}...`, l: 'info' },
-                { t: new Date().toLocaleTimeString(), m: `Download URL: ${url}`, l: 'info' }
+                { t: new Date().toLocaleTimeString(), m: get().t('installingName', { name: `Node.js ${version}` }), l: 'info' },
+                { t: new Date().toLocaleTimeString(), m: get().t('installDownloadUrl', { url }), l: 'info' }
             ],
             nodeInstallProgress: { pct: 0, downloaded: 0, total: 0 }
         }));
@@ -118,7 +118,7 @@ export const createNodeSlice = (set, get) => ({
                         downloaded: s.nodeInstallProgress.total || s.nodeInstallProgress.downloaded,
                         total: s.nodeInstallProgress.total || s.nodeInstallProgress.downloaded
                     },
-                    nodeInstallLogs: [...s.nodeInstallLogs, { t: new Date().toLocaleTimeString(), m: 'Progress complete.', l: 'info' }]
+                    nodeInstallLogs: [...s.nodeInstallLogs, { t: new Date().toLocaleTimeString(), m: get().t('downloadComplete'), l: 'info' }]
                 }));
                 await get().scanInstalledNode();
                 const activeNode = get().nodeVersions.find(v => v.active);
@@ -133,7 +133,7 @@ export const createNodeSlice = (set, get) => ({
                 nodeVersions: hadExisting
                     ? s.nodeVersions.map(v => v.version === version ? { ...v, installing: false } : v)
                     : s.nodeVersions.filter(v => v.version !== version),
-                nodeInstallLogs: [...s.nodeInstallLogs, { t: new Date().toLocaleTimeString(), m: `Error: ${e}`, l: 'err' }]
+                nodeInstallLogs: [...s.nodeInstallLogs, { t: new Date().toLocaleTimeString(), m: get().t('installLogError', { error: `${e}` }), l: 'err' }]
             }));
             get().showToast(get().t('nodeInstallFailed', { error: `${e}` }), 'danger');
         } finally {
