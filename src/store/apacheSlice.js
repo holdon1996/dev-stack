@@ -181,16 +181,33 @@ export const createApacheSlice = (set, get) => ({
         }
     },
 
-    restartApache: () => get()._withService(1, async () => {
+    /**
+     * `configVerified`: the caller (applySites) has just run `httpd -t` on this config, so
+     * the second check (~0.8 s) is skipped. Also used as an onClick handler: an event
+     * object carries no such flag.
+     */
+    restartApache: ({ configVerified = false } = {}) => get()._withService(1, async () => {
         const web = get().services.find(s => s.type === 'web');
         const apacheRoot = get()._activeApacheRoot();
         // Keep the running instance when the new config would not start.
-        if (web?.status === 'running' && apacheRoot && !(await get()._apacheConfigOk(apacheRoot))) return false;
+        if (!configVerified && web?.status === 'running' && apacheRoot && !(await get()._apacheConfigOk(apacheRoot))) return false;
         // Starting while the old instance still holds :80 only fails with "could not bind".
         if ((web?.status === 'running' || web?.pid) && !(await get()._toggleService(1, 'stop'))) return false;
-        await new Promise(r => setTimeout(r, 1000));
+        await get()._waitPortsFree();
         return get()._toggleService(1, 'start');
     }),
+
+    /** Waits (up to ~1.5 s) until Apache's ports are released, instead of a fixed pause. */
+    _waitPortsFree: async () => {
+        const { invoke } = await import('@tauri-apps/api/core');
+        const ports = [parseInt(get().settings.port80) || 80];
+        if (Object.values(get().siteConfigs).some(c => c.managed && c.ssl)) ports.push(443);
+        for (let i = 0; i < 15; i++) {
+            const busy = await invoke('check_ports_status', { ports }).catch(() => []);
+            if (!busy.some(Boolean)) return;
+            await new Promise(r => setTimeout(r, 100));
+        }
+    },
 
     installApacheVersion: async (version) => {
         const v = get().apacheVersions.find(av => av.version === version);

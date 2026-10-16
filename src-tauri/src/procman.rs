@@ -15,6 +15,7 @@ struct Entry {
     pid: Arc<Mutex<Option<u32>>>,
     stop: Arc<AtomicBool>,
     command: String,
+    run: u64,
 }
 
 fn registry() -> &'static Mutex<HashMap<String, Entry>> {
@@ -36,6 +37,9 @@ pub struct ProcState {
     running: bool,
     command: String,
     code: Option<i32>,
+    /// Which `proc_start` of this id the event belongs to: a stopped pool's late
+    /// "exited" event must not mark the pool started again under the same id as stopped.
+    run: u64,
 }
 
 /// What the supervisor reports; `proc_start` forwards it as Tauri events.
@@ -98,7 +102,7 @@ struct Spec {
 fn supervise(spec: Spec, pid: Arc<Mutex<Option<u32>>>, stop: Arc<AtomicBool>, emit: Emit) -> Option<i32> {
     let Spec { id, command, cwd, path_prefix, env, restart } = spec;
     let state = |pid: Option<u32>, code: Option<i32>| ProcEvent::State(ProcState {
-        id: id.clone(), pid, running: pid.is_some(), command: command.clone(), code,
+        id: id.clone(), pid, running: pid.is_some(), command: command.clone(), code, run: 0,
     });
     let mut quick_failures = 0;
     let mut last_code = None;
@@ -141,6 +145,7 @@ fn supervise(spec: Spec, pid: Arc<Mutex<Option<u32>>>, stop: Arc<AtomicBool>, em
 }
 
 /// Starts `command` through `cmd /C` in `cwd` under the supervisor (see `supervise`).
+/// Returns the run number that every `proc-state` event of this run carries.
 #[tauri::command]
 pub fn proc_start(
     app: AppHandle,
@@ -150,24 +155,26 @@ pub fn proc_start(
     path_prefix: String,
     env: HashMap<String, String>,
     restart: bool,
-) -> Result<(), String> {
+) -> Result<u64, String> {
+    static RUNS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     if !Path::new(&cwd).is_dir() {
         return Err(format!("Working directory not found: {cwd}"));
     }
     let stop = Arc::new(AtomicBool::new(false));
     let pid = Arc::new(Mutex::new(None));
+    let run = RUNS.fetch_add(1, Ordering::SeqCst) + 1;
     {
         let mut reg = registry().lock().unwrap();
         if reg.contains_key(&id) {
             return Err(format!("{id} is already running"));
         }
-        reg.insert(id.clone(), Entry { pid: pid.clone(), stop: stop.clone(), command: command.clone() });
+        reg.insert(id.clone(), Entry { pid: pid.clone(), stop: stop.clone(), command: command.clone(), run });
     }
 
     let emit: Emit = Arc::new(move |event| {
         let _ = match event {
             ProcEvent::Log(e) => app.emit("proc-log", e),
-            ProcEvent::State(e) => app.emit("proc-state", e),
+            ProcEvent::State(e) => app.emit("proc-state", ProcState { run, ..e }),
         };
     });
     std::thread::spawn(move || {
@@ -178,15 +185,52 @@ pub fn proc_start(
             reg.remove(&id);
         }
         drop(reg);
-        emit(ProcEvent::State(ProcState { id, pid: None, running: false, command, code }));
+        emit(ProcEvent::State(ProcState { id, pid: None, running: false, command, code, run: 0 }));
     });
-    Ok(())
+    Ok(run)
 }
 
-fn kill_tree(pid: u32) {
-    let _ = crate::site_config::hidden_command("taskkill")
-        .args(["/PID", &pid.to_string(), "/T", "/F"])
-        .output();
+/// Every process in the trees rooted at `roots` (from `(child, parent)` pairs), parents
+/// before their children: a live child keeps its parent's PID from being reused.
+fn tree_pids(parents: &[(u32, u32)], roots: &[u32]) -> Vec<u32> {
+    let mut order = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    let mut stack = roots.to_vec();
+    while let Some(pid) = stack.pop() {
+        if !seen.insert(pid) {
+            continue;
+        }
+        order.push(pid);
+        stack.extend(parents.iter().filter(|(_, parent)| *parent == pid).map(|(child, _)| *child));
+    }
+    order
+}
+
+/// Kills the process trees rooted at `roots` (the `cmd /C` shells and what they started)
+/// with one lightweight process scan, instead of a `taskkill /T` process per tree
+/// (0.2-1 s each on Windows).
+fn kill_trees(roots: &[u32]) {
+    use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
+    if roots.is_empty() {
+        return;
+    }
+    let mut sys = System::new();
+    sys.refresh_processes_specifics(ProcessesToUpdate::All, true, ProcessRefreshKind::nothing());
+    let starts: HashMap<u32, u64> = sys.processes().iter().map(|(pid, p)| (pid.as_u32(), p.start_time())).collect();
+    // A recycled PID can look like a parent: only processes started after it are its children.
+    let parents: Vec<(u32, u32)> = sys
+        .processes()
+        .iter()
+        .filter_map(|(pid, p)| {
+            let parent = p.parent()?.as_u32();
+            (p.start_time() >= *starts.get(&parent)?).then_some((pid.as_u32(), parent))
+        })
+        .collect();
+    for pid in tree_pids(&parents, roots) {
+        if sys.process(Pid::from_u32(pid)).is_some() {
+            crate::terminate_pid(pid);
+        }
+    }
 }
 
 #[tauri::command(async)]
@@ -194,22 +238,24 @@ pub fn proc_stop(id: String) {
     let entry = registry().lock().unwrap().remove(&id);
     if let Some(entry) = entry {
         entry.stop.store(true, Ordering::SeqCst);
-        if let Some(pid) = *entry.pid.lock().unwrap() {
-            kill_tree(pid);
-        }
+        let pid = *entry.pid.lock().unwrap();
+        kill_trees(&pid.into_iter().collect::<Vec<_>>());
     }
 }
 
 #[tauri::command(async)]
 pub fn proc_stop_all() {
-    // In parallel: each `taskkill /T` takes ~200 ms, and a few sites with 4-process
-    // PHP pools add up to seconds when stopped one by one (felt as a hang on close).
-    let ids: Vec<String> = registry().lock().unwrap().keys().cloned().collect();
-    std::thread::scope(|s| {
-        for id in ids {
-            s.spawn(move || proc_stop(id));
-        }
-    });
+    // All trees in one scan: stopping a few sites with 4-process PHP pools one by one
+    // took seconds (felt as a hang on close).
+    let entries: Vec<Entry> = registry().lock().unwrap().drain().map(|(_, entry)| entry).collect();
+    let pids: Vec<u32> = entries
+        .iter()
+        .filter_map(|entry| {
+            entry.stop.store(true, Ordering::SeqCst);
+            *entry.pid.lock().unwrap()
+        })
+        .collect();
+    kill_trees(&pids);
 }
 
 /// `start` command line for a terminal window. `start` gives the shell a console
@@ -266,18 +312,47 @@ pub fn proc_list() -> Vec<ProcState> {
         .iter()
         .map(|(id, e)| {
             let pid = *e.pid.lock().unwrap();
-            ProcState { id: id.clone(), pid, running: pid.is_some(), command: e.command.clone(), code: None }
+            ProcState { id: id.clone(), pid, running: pid.is_some(), command: e.command.clone(), code: None, run: e.run }
         })
         .collect()
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{spawn_shell, supervise, ProcEvent, Spec};
+    use super::{kill_trees, spawn_shell, supervise, tree_pids, ProcEvent, Spec};
     use std::collections::HashMap;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::{Arc, Mutex};
     use std::time::{Duration, Instant};
+
+    #[test]
+    fn tree_pids_lists_parents_before_their_descendants() {
+        // 1 -> 2 -> 3, 1 -> 4; 5 is unrelated.
+        let parents = [(2, 1), (3, 2), (4, 1), (5, 9)];
+        let order = tree_pids(&parents, &[1]);
+        assert_eq!(order.len(), 4);
+        let pos = |pid| order.iter().position(|&p| p == pid).unwrap();
+        assert!(pos(1) < pos(2) && pos(2) < pos(3) && pos(1) < pos(4));
+        assert!(!order.contains(&5));
+    }
+
+    #[test]
+    fn kill_trees_stops_the_shell_and_its_child() {
+        let mut shell = std::process::Command::new("cmd")
+            .args(["/C", "ping -n 30 127.0.0.1 >NUL"])
+            .spawn()
+            .unwrap();
+        std::thread::sleep(Duration::from_millis(500));
+        let started = Instant::now();
+        kill_trees(&[shell.id()]);
+        assert!(shell.wait().is_ok());
+        // The child ping must be gone too, not orphaned.
+        let mut sys = sysinfo::System::new();
+        sys.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
+        let orphan = sys.processes().values().any(|p| p.parent().map(|pp| pp.as_u32()) == Some(shell.id()));
+        assert!(!orphan, "child process survived");
+        assert!(started.elapsed() < Duration::from_secs(2), "took {:?}", started.elapsed());
+    }
 
     /// PID of the program `cmd /C` started (what a user kills in Task Manager).
     fn grandchild_of(shell_pid: u32) -> Option<u32> {

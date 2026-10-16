@@ -6,7 +6,8 @@ import { FCGI_MAX_PROCESSES, SITE_TYPES, domainWarnings, fcgiPorts, parseHostLis
 
 const Field = ({ label, htmlFor, hint, help, children }) => (
   <div className="flex flex-col gap-1.5">
-    <span className="flex items-center gap-1">
+    {/* Fixed label height: inputs in one row line up whether or not a label has a help icon. */}
+    <span className="flex items-center gap-1 min-h-5">
       <label htmlFor={htmlFor} className="text-[12px] font-semibold text-textDim">{label}</label>
       {help && <HelpTip textKey={help.key} anchor={help.anchor} />}
     </span>
@@ -144,7 +145,8 @@ const SiteConfigModal = ({ site, onClose }) => {
 
         <div className="flex-1 overflow-y-auto p-5">
           <Section title={t('siteSectionType')} help={{ key: 'help_siteType', anchor: 'recipe-team' }}>
-            <div className="grid grid-cols-[160px_1fr_auto] gap-3 items-end">
+            {/* Top-aligned: a hint under one field must not push its input above the others. */}
+            <div className="grid grid-cols-[210px_1fr_auto] gap-3 items-start">
               <Field label={t('siteType')} htmlFor="site-type">
                 <select id="site-type" className="select-field" value={draft.type} onChange={e => update({ type: e.target.value })}>
                   {SITE_TYPES.map(type => <option key={type} value={type}>{t(`siteType_${type}`)}</option>)}
@@ -159,9 +161,11 @@ const SiteConfigModal = ({ site, onClose }) => {
                   <input id="site-docroot" className="input-field font-mono" placeholder="public" value={draft.docRoot} onChange={e => update({ docRoot: e.target.value })} spellCheck={false} />
                 </Field>
               )}
-              <button type="button" className="btn-ghost flex items-center gap-1.5 border border-border text-[12px] py-2" onClick={redetect}>
-                <Wand2 size={13} /> {t('detectAgain')}
-              </button>
+              <Field label="">
+                <button type="button" className="btn-ghost flex items-center gap-1.5 border border-border text-[13px] py-2.5 whitespace-nowrap" onClick={redetect}>
+                  <Wand2 size={13} /> {t('detectAgain')}
+                </button>
+              </Field>
             </div>
             {draft.type === 'laravel' && (
               <label className="flex items-start gap-2 mt-3 text-[12px] cursor-pointer">

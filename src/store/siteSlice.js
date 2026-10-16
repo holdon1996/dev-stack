@@ -492,7 +492,8 @@ export const createSiteSlice = (set, get) => ({
             await get()._remindOldFcgiSetup(report);
 
             const apacheRunning = get().services.find(s => s.type === 'web')?.status === 'running';
-            if (restart && apacheRunning) await get().restartApache();
+            // apply_apache_sites has just run `httpd -t` on exactly this config.
+            if (restart && apacheRunning) await get().restartApache({ configVerified: true });
             return true;
         } catch (e) {
             const message = typeof e === 'string' ? e : e?.message || String(e);
@@ -603,10 +604,10 @@ export const createSiteSlice = (set, get) => ({
                 wanted[get().fcgiProcessId(site.key, port)] = { command: `"${dir}\\php-cgi.exe" -b 127.0.0.1:${port}`, dir };
             }
         }
-        for (const [id, proc] of Object.entries(get().procs)) {
-            const isPool = id.startsWith('fcgi:') || id.startsWith('php-fcgi-');
-            if (isPool && proc.running && wanted[id]?.command !== proc.command) await get().stopProcess(id);
-        }
+        // Pools whose PHP or ports changed stop together, not one after another.
+        await Promise.all(Object.entries(get().procs)
+            .filter(([id, proc]) => (id.startsWith('fcgi:') || id.startsWith('php-fcgi-')) && proc.running && wanted[id]?.command !== proc.command)
+            .map(([id]) => get().stopProcess(id)));
         for (const [id, { command, dir }] of Object.entries(wanted)) {
             if (get().procs[id]?.running) continue;
             await get().startProcess({
@@ -636,7 +637,7 @@ export const createSiteSlice = (set, get) => ({
 
     stopFcgiPools: async () => {
         const ids = Object.keys(get().procs).filter(id => id.startsWith('fcgi:') || id.startsWith('php-fcgi-'));
-        for (const id of ids) await get().stopProcess(id);
+        await Promise.all(ids.map(id => get().stopProcess(id)));
     },
 
     /**

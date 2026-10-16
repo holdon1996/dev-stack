@@ -44,9 +44,13 @@ export const createProcessSlice = (set, get) => ({
                 });
                 flushTimer ||= setTimeout(flush, 150);
             }),
-            await listen('proc-state', ({ payload }) => set(s => ({
-                procs: { ...s.procs, [payload.id]: { running: payload.running, pid: payload.pid, command: payload.command, code: payload.code } },
-            }))),
+            await listen('proc-state', ({ payload }) => set(s => {
+                // A late "exited" from an earlier run of a restarted id (runs only grow) is stale.
+                if (s.procs[payload.id]?.run > payload.run) return {};
+                return {
+                    procs: { ...s.procs, [payload.id]: { running: payload.running, pid: payload.pid, command: payload.command, code: payload.code, run: payload.run } },
+                };
+            })),
         ];
         const running = await invoke('proc_list').catch(() => []);
         set({ procs: Object.fromEntries(running.map(p => [p.id, p])) });
@@ -99,8 +103,8 @@ export const createProcessSlice = (set, get) => ({
         const { invoke } = await import('@tauri-apps/api/core');
         try {
             set(s => ({ procLogs: { ...s.procLogs, [id]: [{ t: new Date().toLocaleTimeString(), m: `$ ${command}`, l: 'info' }] } }));
-            await invoke('proc_start', { id, command, cwd: win(cwd), pathPrefix, env, restart });
-            set(s => ({ procs: { ...s.procs, [id]: { running: true, command } } }));
+            const run = await invoke('proc_start', { id, command, cwd: win(cwd), pathPrefix, env, restart });
+            set(s => ({ procs: { ...s.procs, [id]: { ...s.procs[id], running: true, command, run: Math.max(run, s.procs[id]?.run || 0) } } }));
             return true;
         } catch (e) {
             showToast(`${e}`, 'danger');

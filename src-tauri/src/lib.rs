@@ -907,7 +907,7 @@ fn kill_by_name_under(sys: &mut System, name: &str, under_dir: Option<&str>) -> 
                 continue;
             }
         }
-        if process.kill() {
+        if terminate_pid(process.pid().as_u32()) {
             any_killed = true;
         }
     }
@@ -953,6 +953,29 @@ fn set_devstack_dir(state: tauri::State<'_, AppState>, dir: String) {
 
 const SERVICE_EXES: [&str; 7] = ["httpd.exe", "mysqld.exe", "redis-server.exe", "php-cgi.exe", "php.exe", "mailpit.exe", "minio.exe"];
 
+/// Ends a process directly with TerminateProcess. sysinfo's `Process::kill` spawns a
+/// `taskkill.exe` per process on Windows (0.2-1 s each), which made stopping pools,
+/// Apache and the whole app slow.
+#[cfg(target_os = "windows")]
+pub(crate) fn terminate_pid(pid: u32) -> bool {
+    use windows_sys::Win32::Foundation::CloseHandle;
+    use windows_sys::Win32::System::Threading::{OpenProcess, TerminateProcess, PROCESS_TERMINATE};
+    unsafe {
+        let handle = OpenProcess(PROCESS_TERMINATE, 0, pid);
+        if handle.is_null() {
+            return false;
+        }
+        let ok = TerminateProcess(handle, 1) != 0;
+        CloseHandle(handle);
+        ok
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+pub(crate) fn terminate_pid(pid: u32) -> bool {
+    std::process::Command::new("kill").args(["-9", &pid.to_string()]).status().is_ok_and(|s| s.success())
+}
+
 /// Stops the processes DevStack started (procman + service binaries inside the
 /// DevStack folder). Runs on window close and tray Quit, so Alt+F4 behaves the same.
 fn stop_devstack_processes(app: &tauri::AppHandle) {
@@ -967,7 +990,7 @@ fn stop_devstack_processes(app: &tauri::AppHandle) {
         let name = process.name().to_str().unwrap_or("").to_lowercase();
         let exe = process.exe().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_default();
         if SERVICE_EXES.contains(&name.as_str()) && exe.starts_with(prefix.as_str()) {
-            process.kill();
+            terminate_pid(process.pid().as_u32());
         }
     }
 }
@@ -1060,7 +1083,7 @@ fn kill_process_by_port(state: tauri::State<'_, AppState>, port: u16) -> bool {
         let mut sys = state.sys.lock().unwrap();
         sys.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
         if let Some(proc) = sys.process(sysinfo::Pid::from_u32(pid)) {
-            return proc.kill();
+            return terminate_pid(proc.pid().as_u32());
         }
     }
     false
