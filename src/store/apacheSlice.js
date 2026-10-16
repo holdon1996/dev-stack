@@ -1,4 +1,5 @@
 import { getApacheDir, getPhpDir } from '../lib/paths';
+import { forgetFetch, shouldFetch } from '../lib/fetchOnce';
 
 const getApacheVersionFromFolder = (folderName) => {
     const normalized = folderName.trim().toLowerCase();
@@ -60,7 +61,10 @@ export const createApacheSlice = (set, get) => ({
         }
     },
 
-    fetchApacheVersions: async () => {
+    /** `force`: the Refresh button; otherwise the remote list is fetched at most once an hour. */
+    fetchApacheVersions: async ({ force = false } = {}) => {
+        if (force) forgetFetch('apache-versions');
+        if (!shouldFetch('apache-versions')) return;
         try {
             const { invoke } = await import('@tauri-apps/api/core');
             // Dynamically fetched from apachelounge.com via Rust reqwest — no PS, no hardcode
@@ -79,6 +83,7 @@ export const createApacheSlice = (set, get) => ({
                 return { apacheVersions: [...newList, ...installedOld] };
             });
         } catch (e) {
+            forgetFetch('apache-versions'); // retry on the next visit
             console.error('fetchApacheVersions failed:', e);
         }
     },

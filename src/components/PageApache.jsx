@@ -103,7 +103,7 @@ const PageApache = () => {
               )}
               <button
                 className="btn-ghost text-[11px] flex items-center gap-1.5"
-                onClick={async () => { await Promise.all([scanInstalledApache(), fetchApacheVersions()]); showToast(t('apacheListRefreshed'), 'ok'); }}
+                onClick={async () => { await fetchApacheVersions({ force: true }); await scanInstalledApache(); showToast(t('apacheListRefreshed'), 'ok'); }}
               >
                 <RefreshCw size={11} /> {t('refresh')}
               </button>

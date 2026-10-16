@@ -184,12 +184,13 @@ export const createServiceSlice = (set, get) => ({
             .catch(() => {});
     },
 
-    addServiceLog: (type, m, l = 'info') => set(s => ({
-        logs: {
-            ...s.logs,
-            [type]: [...(s.logs[type] || []), { t: new Date().toLocaleTimeString(), m, l }].slice(-200)
-        }
-    })),
+    addServiceLog: (type, m, l = 'info') => get().addServiceLogs(type, [{ m, l }]),
+
+    /** Appends several lines in one store update (a streamed log can deliver dozens at once). */
+    addServiceLogs: (type, lines) => set(s => {
+        const t = new Date().toLocaleTimeString();
+        return { logs: { ...s.logs, [type]: [...(s.logs[type] || []), ...lines.map(({ m, l = 'info' }) => ({ t, m, l }))].slice(-200) } };
+    }),
 
     checkServicesRunning: async () => {
         try {
@@ -907,8 +908,17 @@ export const createServiceSlice = (set, get) => ({
                 }
 
                 const eventName = `log-stream-${type}`;
+                // One event per line arrives in bursts: buffer and update the store every 150 ms.
+                let pending = [];
+                let flushTimer = null;
                 const unlisten = await listen(eventName, (event) => {
-                    addServiceLog(type, `[File] ${event.payload}`, event.payload.toLowerCase().includes('error') ? 'err' : 'info');
+                    pending.push({ m: `[File] ${event.payload}`, l: event.payload.toLowerCase().includes('error') ? 'err' : 'info' });
+                    flushTimer ||= setTimeout(() => {
+                        flushTimer = null;
+                        const lines = pending;
+                        pending = [];
+                        get().addServiceLogs(type, lines);
+                    }, 150);
                 });
 
                 // The generation lets a late stop end only this stream, never a newer one.

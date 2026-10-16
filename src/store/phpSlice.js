@@ -1,4 +1,5 @@
 import { getPhpDir, getBinDir, installedVersionFolders } from '../lib/paths';
+import { forgetFetch, shouldFetch } from '../lib/fetchOnce';
 import { usesFcgi } from '../lib/sites';
 
 export const createPhpSlice = (set, get) => ({
@@ -112,7 +113,10 @@ export const createPhpSlice = (set, get) => ({
         } catch { }
     },
 
-    fetchPhpVersions: async () => {
+    /** `force`: the Refresh button; otherwise the remote list is fetched at most once an hour. */
+    fetchPhpVersions: async ({ force = false } = {}) => {
+        if (force) forgetFetch('php-versions');
+        if (!shouldFetch('php-versions')) return;
         try {
             const { invoke } = await import('@tauri-apps/api/core');
             // Dynamically fetched from windows.php.net via Rust reqwest — no PS, no hardcode
@@ -172,6 +176,7 @@ export const createPhpSlice = (set, get) => ({
                 return { phpVersions: combined };
             });
         } catch (e) {
+            forgetFetch('php-versions'); // retry on the next visit
             console.error('fetchPhpVersions failed:', e);
         }
     },

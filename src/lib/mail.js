@@ -33,7 +33,15 @@ export const snippetForMail = (host, smtpPort) => ({
   wordpress: `define('WP_MAIL_SMTP_HOST', '${host}');\ndefine('WP_MAIL_SMTP_PORT', ${smtpPort});`,
 });
 
+let latestRelease = null;
+
+/** Latest Mailpit release, fetched once per app session (GitHub allows 60 anonymous calls an hour). */
 export const fetchLatestMailpitRelease = async () => {
+  latestRelease ||= fetchMailpitRelease().catch((e) => { latestRelease = null; throw e; });
+  return latestRelease;
+};
+
+const fetchMailpitRelease = async () => {
   const res = await fetch(MAILPIT_REPO_API, { headers: { Accept: 'application/vnd.github+json' } });
   const data = await res.json();
   const asset = data.assets?.find((item) => item.name === 'mailpit-windows-amd64.zip');

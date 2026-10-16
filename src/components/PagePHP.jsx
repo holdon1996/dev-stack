@@ -184,7 +184,7 @@ const PagePHP = () => {
             </div>
             <button className="btn-ghost text-[11px] flex items-center gap-1.5" onClick={async () => {
               showToast(t('updatingPhpList'), 'info');
-              await fetchPhpVersions();
+              await fetchPhpVersions({ force: true });
               await Promise.all([detectPhpVersion(), scanInstalledPhp()]);
               showToast(t('phpListRefreshed'), 'ok');
             }}>
