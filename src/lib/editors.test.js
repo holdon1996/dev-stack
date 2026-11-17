@@ -16,6 +16,6 @@ test('firstPerEditor keeps one path per editor', () => {
 
 test('folderOpenArgs never hands a project folder to a file-only editor', () => {
     assert.equal(folderOpenArgs('C:\\Windows\\notepad.exe', 'F:\\www\\app'), null);
-    assert.deepEqual(folderOpenArgs('C:/Program Files/Notepad++/notepad++.exe', 'F:\\www\\app'), ['-openFoldersAsWorkspace', 'F:\\www\\app']);
+    assert.deepEqual(folderOpenArgs('C:/Program Files/Notepad++/notepad++.exe', 'F:\\www\\app'), ['-multiInst', '-nosession', '-openFoldersAsWorkspace', 'F:\\www\\app']);
     assert.deepEqual(folderOpenArgs('C:/x/Code.exe', 'F:\\www\\app'), ['F:\\www\\app']);
 });

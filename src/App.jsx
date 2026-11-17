@@ -16,6 +16,7 @@ import PageMailServer from './components/PageMailServer';
 import PageGuide from './components/PageGuide';
 import PageDomains from './components/PageDomains';
 import Toast from './components/Toast';
+import Tooltip from './components/Tooltip';
 import Modal from './components/Modal';
 import { X, Minus, Maximize2 } from 'lucide-react';
 
@@ -133,6 +134,7 @@ function App() {
       </div>
 
       <Toast />
+      <Tooltip />
       <Modal />
     </div>
   );
