@@ -183,12 +183,6 @@ const SiteConfigModal = ({ site, onClose }) => {
                 </button>
               </Field>
             </div>
-            {draft.type === 'laravel' && (
-              <label className="flex items-start gap-2 mt-3 text-[12px] cursor-pointer">
-                <input type="checkbox" className="mt-0.5" checked={draft.nginxRewrite !== false} onChange={e => update({ nginxRewrite: e.target.checked })} />
-                <span>{t('nginxRewrite')}<span className="block text-[11px] text-muted">{t('nginxRewriteHint')}</span></span>
-              </label>
-            )}
           </Section>
 
           <Section title={t('siteSectionDomain')} help={{ key: 'help_https', anchor: 'troubleshooting' }}>
@@ -231,7 +225,7 @@ const SiteConfigModal = ({ site, onClose }) => {
 
           {draft.type !== 'proxy' && (
             <Section title={t('siteSectionPhp')}>
-              <div className="grid grid-cols-[1fr_150px] gap-3">
+              <div className="grid grid-cols-1 gap-3">
                 <Field label={t('sitePhpVersion')} htmlFor="site-php" hint={t('sitePhpVersionHint')} help={{ key: 'help_phpMode', anchor: 'troubleshooting' }}>
                   <select
                     id="site-php"
@@ -248,25 +242,17 @@ const SiteConfigModal = ({ site, onClose }) => {
                     <option value="module">{t('phpGlobalModule')}</option>
                   </select>
                 </Field>
-                {draft.phpMode !== 'module' && (
-                  <Field label={t('fcgiProcesses')} htmlFor="site-fcgi-n" hint={t('fcgiProcessesHint', { max: FCGI_MAX_PROCESSES })} help={{ key: 'help_fcgiProcesses' }}>
-                    <input id="site-fcgi-n" type="number" min="1" max={FCGI_MAX_PROCESSES} className="input-field" value={draft.fcgiProcesses ?? 4} onChange={e => update({ fcgiProcesses: e.target.value })} />
-                  </Field>
-                )}
               </div>
-              {draft.phpMode !== 'module' && Number.isInteger(saved?.fcgiPortBase) && (
-                <div className="text-[11px] text-muted font-mono mt-2">{t('fcgiPortsLabel', { ports: fcgiPorts(saved).join(', ') })}</div>
-              )}
             </Section>
           )}
 
           <Section title={t('siteSectionGroup')} help={{ key: 'help_group', anchor: 'recipe-team' }}>
-            <div className="grid grid-cols-[1fr_120px] gap-3">
+            <div className="grid grid-cols-[1fr_180px] gap-3 items-start">
               <Field label={t('groupName')} htmlFor="site-group" hint={t('groupNameHint')}>
                 <input id="site-group" list="site-groups" className="input-field" value={draft.group || ''} onChange={e => update({ group: e.target.value.trim() })} />
                 <datalist id="site-groups">{groupNames().map(g => <option key={g} value={g} />)}</datalist>
               </Field>
-              <Field label={t('startOrder')} htmlFor="site-order">
+              <Field label={t('startOrder')} htmlFor="site-order" hint={t('startOrderHint')}>
                 <input id="site-order" type="number" className="input-field" value={draft.order || 0} onChange={e => update({ order: e.target.value })} />
               </Field>
             </div>
@@ -325,6 +311,32 @@ const SiteConfigModal = ({ site, onClose }) => {
               <span className="text-[11px] text-muted">{t('processesHint')}</span>
             </div>
           </Section>
+
+          {/* Options most projects never touch: collapsed so the form reads top to bottom. */}
+          {(draft.type === 'laravel' || (draft.type !== 'proxy' && draft.phpMode !== 'module')) && (
+            <details className="border-t border-border pt-4 mt-4">
+              <summary className="cursor-pointer text-[11px] font-bold text-muted tracking-[0.08em] uppercase">{t('siteAdvanced')}</summary>
+              <div className="flex flex-col gap-3 mt-3">
+                {draft.type === 'laravel' && (
+                  <label className="flex items-start gap-2 text-[12px] cursor-pointer">
+                    <input type="checkbox" className="mt-0.5" checked={draft.nginxRewrite !== false} onChange={e => update({ nginxRewrite: e.target.checked })} />
+                    <span>{t('nginxRewrite')}<span className="block text-[11px] text-muted">{t('nginxRewriteHint')}</span></span>
+                  </label>
+                )}
+                {draft.type !== 'proxy' && draft.phpMode !== 'module' && (
+                  <div className="grid grid-cols-[150px_1fr] gap-3 items-start">
+                    <Field label={t('fcgiProcesses')} htmlFor="site-fcgi-n" help={{ key: 'help_fcgiProcesses' }}>
+                      <input id="site-fcgi-n" type="number" min="1" max={FCGI_MAX_PROCESSES} className="input-field" value={draft.fcgiProcesses ?? 4} onChange={e => update({ fcgiProcesses: e.target.value })} />
+                    </Field>
+                    <div className="text-[11px] text-muted pt-6">
+                      {t('fcgiProcessesHint', { max: FCGI_MAX_PROCESSES })}
+                      {Number.isInteger(saved?.fcgiPortBase) && <div className="font-mono mt-1">{t('fcgiPortsLabel', { ports: fcgiPorts(saved).join(', ') })}</div>}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </details>
+          )}
         </div>
 
         <div className="px-5 py-3.5 border-t border-border flex justify-end gap-2">

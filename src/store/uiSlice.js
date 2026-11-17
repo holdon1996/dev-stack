@@ -66,18 +66,43 @@ export const createUiSlice = (set, get) => ({
     projectLogSite: '',
     openProjectLogs: (siteKey) => set({ projectLogSite: siteKey, activePage: 'logs' }),
 
-    /** Opens a project folder in the editor from Settings (VS Code, PhpStorm, ...). */
+    /** Opens a project folder (Projects page) with the editor chosen in Settings. */
     openInEditor: async (path) => {
         const { settings, t, showToast } = get();
         if (!settings.editorPath) {
             showToast(t('editorNotSet'), 'info', { action: { label: t('settings'), page: 'settings' } });
             return;
         }
+        const { folderOpenArgs } = await import('../lib/editors');
+        const args = folderOpenArgs(settings.editorPath, path.replace(/\//g, '\\'));
+        if (!args) {
+            showToast(t('editorNoFolders'), 'info', { action: { label: t('settings'), page: 'settings' } });
+            return;
+        }
         try {
             const { invoke } = await import('@tauri-apps/api/core');
-            await invoke('open_file_default', { path: path.replace(/\//g, '\\'), editor: settings.editorPath, admin: false });
+            const ok = await invoke('start_detached_process', { executable: settings.editorPath, args, cwd: null });
+            if (!ok) throw settings.editorPath;
         } catch (e) {
             showToast(t('editorOpenFailed', { error: `${e}` }), 'danger', { action: { label: t('settings'), page: 'settings' } });
+        }
+    },
+
+    /** Editors installed in their usual folders, for one-click picking in Settings. */
+    detectEditors: async () => {
+        try {
+            const { invoke } = await import('@tauri-apps/api/core');
+            const { localDataDir } = await import('@tauri-apps/api/path');
+            const { editorCandidates, firstPerEditor } = await import('../lib/editors');
+            const local = (await localDataDir()).replace(/[\\/]$/, '');
+            const pf = 'C:/Program Files';
+            const jetbrains = await invoke('list_subdirs', { path: `${pf}/JetBrains` });
+            const candidates = editorCandidates({ local, pf, pf86: 'C:/Program Files (x86)', jetbrains });
+            const exists = await Promise.all(candidates.map(c => invoke('path_exists', { path: c.path })));
+            return firstPerEditor(candidates.filter((_, i) => exists[i]));
+        } catch (e) {
+            console.error('detectEditors failed:', e);
+            return [];
         }
     },
 

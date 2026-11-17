@@ -1,114 +1,123 @@
 import React from 'react';
 import { useStore } from '../store';
-import { Bug, Download, FolderSearch, RefreshCw } from 'lucide-react';
+import { Bug, Check, Download, FolderSearch, RefreshCw } from 'lucide-react';
+
+const Section = ({ title, desc, action, children }) => (
+  <section className="bg-surface border border-border rounded-xl p-5 flex flex-col gap-4">
+    <div className="flex items-start justify-between gap-3 border-b border-border pb-3">
+      <div>
+        <h2 className="text-[11px] font-bold text-muted tracking-[0.08em] uppercase m-0">{title}</h2>
+        {desc && <p className="text-[11px] text-muted mt-1 mb-0">{desc}</p>}
+      </div>
+      {action}
+    </div>
+    {children}
+  </section>
+);
+
+const Toggle = ({ active, onToggle, label }) => (
+  <button
+    type="button"
+    role="switch"
+    aria-checked={!!active}
+    aria-label={label}
+    onClick={onToggle}
+    className={`w-10 h-[22px] shrink-0 p-0 ${active ? 'bg-accent' : 'bg-border'} rounded-[11px] cursor-pointer relative transition-colors duration-200`}
+  >
+    <span className={`block w-[18px] h-[18px] bg-white rounded-full absolute top-0.5 transition-all duration-200 ${active ? 'right-0.5' : 'left-0.5'}`}></span>
+  </button>
+);
+
+/** A folder setting: edits stay local until "Apply", which moves DevStack to the new folder. */
+const FolderField = ({ id, settingKey, label, desc }) => {
+  const { settings, updateSetting, browseForFolder, t } = useStore();
+  const saved = settings[settingKey] || '';
+  const [value, setValue] = React.useState(saved);
+  React.useEffect(() => setValue(saved), [saved]);
+  // Same folder written differently (\ vs /, trailing slash) is not a change: Apply restarts everything.
+  const norm = (p) => p.trim().replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
+  const dirty = value.trim() !== '' && norm(value) !== norm(saved);
+
+  const browse = async () => {
+    const path = await browseForFolder();
+    if (path) setValue(path.replace(/\\/g, '/'));
+  };
+
+  return (
+    <div className="flex flex-col gap-1.5">
+      <label htmlFor={id} className="text-[13px] font-semibold text-textDim">{label}</label>
+      <div className="flex gap-2">
+        <input id={id} className="input-field flex-1 font-mono" value={value} onChange={(e) => setValue(e.target.value)} spellCheck={false} />
+        <button type="button" className="btn-ghost px-3 flex items-center gap-1.5" onClick={browse}>
+          <FolderSearch size={14} /> {t('browse')}
+        </button>
+        {/* updateSetting stops services, rewrites Apache/MySQL paths and starts them again. */}
+        {dirty && (
+          <button type="button" className="btn-primary px-3 flex items-center gap-1.5" onClick={() => updateSetting(settingKey, value.trim())}>
+            <Check size={14} /> {t('applyPath')}
+          </button>
+        )}
+      </div>
+      <span className="text-[11px] text-muted">{desc}</span>
+      {dirty && <span className="text-[11px] text-warn">{t('applyPathPending')}</span>}
+    </div>
+  );
+};
+
+const samePath = (a, b) => a.replace(/\\/g, '/').toLowerCase() === b.replace(/\\/g, '/').toLowerCase();
+
+const EditorField = ({ id, label, desc, value, placeholder, onChange, onBrowse, found }) => {
+  const { t } = useStore();
+  return (
+    <div className="flex flex-col gap-1.5">
+      <label htmlFor={id} className="text-[13px] font-semibold text-textDim">{label}</label>
+      <div className="flex gap-2">
+        <input id={id} className="input-field flex-1 font-mono placeholder:font-sans" value={value} placeholder={placeholder} onChange={(e) => onChange(e.target.value)} spellCheck={false} />
+        <button type="button" className="btn-ghost px-3 flex items-center gap-1.5" onClick={onBrowse}>
+          <FolderSearch size={14} /> {t('browse')}
+        </button>
+      </div>
+      {found.length > 0 && (
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="text-[11px] text-muted">{t('editorsFound')}</span>
+          {found.map(e => (
+            <button
+              key={e.path}
+              type="button"
+              title={e.path}
+              aria-pressed={samePath(value, e.path)}
+              className={`text-[11px] px-2 py-0.5 rounded-md border ${samePath(value, e.path) ? 'border-accent text-accent' : 'border-border text-textDim hover:text-text'}`}
+              onClick={() => onChange(e.path)}
+            >
+              {e.name}
+            </button>
+          ))}
+        </div>
+      )}
+      <span className="text-[11px] text-muted">{desc}</span>
+    </div>
+  );
+};
 
 const PageSettings = () => {
   const {
-    settings,
-    toggleSetting,
-    updateSetting,
-    showToast,
-    locale,
-    setLocale,
-    browseForFolder,
-    browseForEditor,
-    t,
-    appUpdate,
-    checkAppUpdate,
-    openAppUpdateUrl,
-    installAppUpdate,
+    settings, toggleSetting, updateSetting, showToast, locale, setLocale, browseForEditor, detectEditors, t,
+    appUpdate, checkAppUpdate, openAppUpdateUrl, installAppUpdate,
   } = useStore();
+  const [found, setFound] = React.useState([]);
+  const [rescanning, setRescanning] = React.useState(false);
 
-  // Local state for paths to prevent immediate rescanning while typing
-  const [localRootPath, setLocalRootPath] = React.useState(settings.rootPath);
-  const [localDevDir, setLocalDevDir] = React.useState(settings.devStackDir);
-
-  React.useEffect(() => {
-    setLocalRootPath(settings.rootPath);
-    setLocalDevDir(settings.devStackDir);
-  }, [settings.rootPath, settings.devStackDir]);
-
-  const Toggle = ({ active, onToggle, label }) => (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={!!active}
-      aria-label={label}
-      onClick={onToggle}
-      className={`w-10 h-[22px] shrink-0 p-0 ${active ? 'bg-accent' : 'bg-border'} rounded-[11px] cursor-pointer relative transition-colors duration-200`}
-    >
-      <span className={`block w-[18px] h-[18px] bg-white rounded-full absolute top-0.5 transition-all duration-200 ${active ? 'right-0.5' : 'left-0.5'}`}></span>
-    </button>
-  );
-
-  const handleBrowse = async (key) => {
-    const path = await browseForFolder();
-    if (path) {
-      if (key === 'rootPath') setLocalRootPath(path);
-      if (key === 'devStackDir') setLocalDevDir(path);
-      showToast(t('pathSelectedSave'), 'info');
-    }
-  };
-
-  const handleApplyChanges = async () => {
-    const { updateServicePort, services, apacheVersions, scanInstalledApache } = useStore.getState();
-
-    // Update permanent settings (may no-op if value unchanged, that's fine)
-    updateSetting('rootPath', localRootPath);
-    updateSetting('devStackDir', localDevDir);
-
-    // Always force-patch httpd.conf regardless of whether the value "changed".
-    // updateSetting skips processing when oldValue === newValue, so we do the patch here directly.
-    const { invoke } = await import('@tauri-apps/api/core');
-    const dsDir = localDevDir.replace(/\\/g, '/').replace(/\/$/, '');
-    const docRoot = localRootPath.replace(/\\/g, '/').replace(/\/$/, '');
-
-    // Find active Apache: use current state first, fallback to scan
-    let activeApache = apacheVersions.find(v => v.active && v.installed)
-      || apacheVersions.find(v => v.installed);
-
-    if (!activeApache) {
-      // Try scanning in case something wasn't detected yet
-      await scanInstalledApache();
-      activeApache = useStore.getState().apacheVersions.find(v => v.active && v.installed)
-        || useStore.getState().apacheVersions.find(v => v.installed);
-    }
-
-    if (activeApache) {
-      const serverRoot = `${dsDir}/bin/apache/apache-${activeApache.version}`;
-      // Awaited: the port update below restarts Apache, which must see the patched config,
-      // and "saved" must not be reported when the patch failed.
-      try {
-        await invoke('patch_apache_paths', {
-          newServerRoot: serverRoot,
-          newDocRoot: docRoot,
-          port: parseInt(settings.port80) || 80,
-        });
-      } catch (err) {
-        console.error('patch_apache_paths failed:', err);
-        showToast(t('apacheConfigError', { error: err }), 'danger');
-        return;
-      }
-    } else {
-      showToast(t('noApacheVersionToPatch'), 'warn');
-    }
-
-    if (services.find(s => s.type === 'web')) await updateServicePort(1, settings.port80);
-    if (services.find(s => s.type === 'db')) await updateServicePort(2, settings.portMySQL);
-
-    showToast(t('settingsSaved'), 'ok');
-  };
+  React.useEffect(() => { detectEditors().then(setFound); }, []);
 
   // Only rescans installs and projects: initApp would auto-start services and toast "ready" again.
   const handleRescan = async () => {
-    updateSetting('rootPath', localRootPath);
-    updateSetting('devStackDir', localDevDir);
-    showToast(t('rescanning'), 'info');
+    setRescanning(true);
     const s = useStore.getState();
     // allSettled: one failing scan must not hide the others' results.
     await Promise.allSettled([s.scanInstalledApache(), s.scanInstalledPhp(), s.scanInstalledMysql(), s.scanInstalledNode(), s.resolveRedis(), s.scanSites()]);
     // A PHP copied into bin/php by hand gets its CA settings now, not at the next app start.
     await s.ensurePhpCaConfig();
+    setRescanning(false);
     showToast(t('installsRescanned'), 'ok');
   };
 
@@ -116,7 +125,6 @@ const PageSettings = () => {
     try {
       const { invoke } = await import('@tauri-apps/api/core');
       await invoke('open_main_devtools');
-      showToast(t('inspectorOpened'), 'ok');
     } catch (e) {
       console.error('open_main_devtools failed:', e);
       showToast(t('inspectorError', { error: e }), 'danger');
@@ -130,258 +138,162 @@ const PageSettings = () => {
     available: 'text-warn border-[#f5a62333]',
     error: 'text-danger border-[#ff4d6d33]'
   };
-
-  const updateStatusLabel = (() => {
-    if (appUpdate.status === 'checking') return t('updateChecking');
-    if (appUpdate.status === 'up-to-date') return t('updateUpToDate');
-    if (appUpdate.status === 'available') return t('updateAvailable');
-    if (appUpdate.status === 'error') return t('updateCheckError');
-    return t('updateIdle');
-  })();
-
+  const updateStatusLabel = {
+    checking: t('updateChecking'),
+    'up-to-date': t('updateUpToDate'),
+    available: t('updateAvailable'),
+    error: t('updateCheckError'),
+  }[appUpdate.status] || t('updateIdle');
   const installProgressPct = appUpdate.totalBytes > 0
     ? Math.min(100, Math.round((appUpdate.downloadedBytes / appUpdate.totalBytes) * 100))
     : 0;
-
-  const formatReleaseDate = (value) => {
-    if (!value) return '';
-
-    const direct = new Date(value);
-    if (!Number.isNaN(direct.getTime())) {
-      return direct.toLocaleString();
-    }
-
-    const normalized = value
-      .replace(' +00:00:00', 'Z')
-      .replace(/ (\+|-)(\d{2}):(\d{2}):(\d{2})$/, (_, sign, hh, mm) => `${sign}${hh}:${mm}`);
-    const parsed = new Date(normalized);
-    if (!Number.isNaN(parsed.getTime())) {
-      return parsed.toLocaleString();
-    }
-
-    return '';
-  };
-
-  const publishedAtLabel = formatReleaseDate(appUpdate.publishedAt);
-  const formattedReleaseNotes = React.useMemo(() => {
-    if (!appUpdate.notes) return '';
-
-    return appUpdate.notes
-      .replace(/\*\*(.*?)\*\*/g, '$1')
-      .replace(/^-\s+/gm, '• ');
-  }, [appUpdate.notes]);
+  const installLabel = {
+    downloading: `${t('updateDownloading')} ${installProgressPct}%`,
+    installing: t('updateInstalling'),
+    installed: t('updateInstalled'),
+    error: t('updateInstallError'),
+  }[appUpdate.installStatus];
+  const releaseNotes = React.useMemo(
+    () => (appUpdate.notes || '').replace(/\*\*(.*?)\*\*/g, '$1').replace(/^-\s+/gm, '• '),
+    [appUpdate.notes]
+  );
+  const configEditor = settings.configEditorPath || '';
 
   return (
     <div className="flex-1 flex flex-col overflow-y-auto">
-      <div className="px-6 py-5 border-b border-[#1a1c22] bg-bg flex items-center">
-        <div className="flex-1">
-          <h1 className="text-[20px] font-extrabold m-0">{t('settingsTitle')}</h1>
-          <p className="text-[12px] text-muted m-0 mt-1 font-mono">{t('settingsDesc')}</p>
-        </div>
-        <button className="btn-ghost flex items-center gap-2 mr-2" onClick={handleOpenInspector}>
-          <Bug size={14} /> {t('inspect')}
-        </button>
-        <button className="btn-ghost flex items-center gap-2" onClick={handleRescan}>
-          <RefreshCw size={14} /> {t('rescan')}
-        </button>
+      <div className="px-6 py-5 border-b border-[#1a1c22] bg-bg">
+        <h1 className="text-[20px] font-extrabold m-0">{t('settingsTitle')}</h1>
+        <p className="text-[12px] text-muted m-0 mt-1">{t('settingsDesc')}</p>
       </div>
 
       <div className="p-6 max-w-[800px] flex flex-col gap-5">
-        {/* Language */}
-        <div className="bg-surface border border-border rounded-xl p-5 flex flex-col gap-4">
-          <div className="text-[11px] font-bold text-muted tracking-[0.08em] uppercase border-b border-border pb-3">{t('language')}</div>
-          <div className="flex items-center justify-between">
-            <div className="text-[13px] font-semibold">{t('languageDesc')}</div>
-            <select className="select-field w-[180px]" value={locale} onChange={(e) => setLocale(e.target.value)}>
-              <option value="en">🇺🇸 English</option>
-              <option value="vi">🇻🇳 Tiếng Việt</option>
+        <Section title={t('foldersSection')} desc={t('foldersSectionDesc')}>
+          <FolderField id="settings-www" settingKey="rootPath" label={t('rootDocPath')} desc={t('rootDocPathDesc')} />
+          <FolderField id="settings-devstack" settingKey="devStackDir" label={t('devStackDir')} desc={t('devStackDirDesc')} />
+          <div className="flex items-center justify-between gap-3 border-t border-border pt-4">
+            <div>
+              <div className="text-[13px] font-semibold">{t('rescanInstalls')}</div>
+              <div className="text-[11px] text-muted">{t('rescanInstallsDesc')}</div>
+            </div>
+            <button type="button" className="btn-ghost flex items-center gap-2 shrink-0" onClick={handleRescan} disabled={rescanning}>
+              <RefreshCw size={14} className={rescanning ? 'animate-spin' : ''} /> {t('rescan')}
+            </button>
+          </div>
+        </Section>
+
+        <Section title={t('editorsSection')}>
+          <EditorField
+            id="settings-project-editor"
+            label={t('projectEditor')}
+            desc={t('projectEditorDesc')}
+            value={settings.editorPath || ''}
+            placeholder={t('defaultEditorPlaceholder')}
+            onChange={(v) => updateSetting('editorPath', v)}
+            onBrowse={() => browseForEditor('editorPath')}
+            found={found}
+          />
+          <EditorField
+            id="settings-config-editor"
+            label={t('configEditor')}
+            desc={t('configEditorDesc')}
+            value={configEditor}
+            placeholder={t('configEditorPlaceholder')}
+            onChange={(v) => updateSetting('configEditorPath', v)}
+            onBrowse={() => browseForEditor('configEditorPath')}
+            found={found}
+          />
+        </Section>
+
+        <Section title={t('appSection')}>
+          <div className="flex items-center justify-between gap-3">
+            <label htmlFor="settings-language" className="text-[13px] font-semibold">{t('languageDesc')}</label>
+            <select id="settings-language" className="select-field w-[180px]" value={locale} onChange={(e) => setLocale(e.target.value)}>
+              <option value="en">English</option>
+              <option value="vi">Tiếng Việt</option>
             </select>
           </div>
-        </div>
-
-        {/* Paths */}
-        <div className="bg-surface border border-border rounded-xl p-5 flex flex-col gap-4">
-          <div className="text-[11px] font-bold text-muted tracking-[0.08em] uppercase border-b border-border pb-3">{t('general')}</div>
-
-          <div className="flex flex-col gap-1.5">
-            <label className="text-[13px] font-semibold text-textDim">{t('rootDocPath')}</label>
-            <div className="flex gap-2">
-              <input className="input-field flex-1" value={localRootPath} onChange={(e) => setLocalRootPath(e.target.value)} />
-              <button className="btn-ghost px-3 flex items-center gap-1.5" onClick={() => handleBrowse('rootPath')}>
-                <FolderSearch size={14} /> {t('browse')}
-              </button>
-            </div>
-            <span className="text-[11px] text-muted">{t('rootDocPathDesc')}</span>
-          </div>
-
-          <div className="flex flex-col gap-1.5">
-            <label className="text-[13px] font-semibold text-textDim">{t('devStackDir')}</label>
-            <div className="flex gap-2">
-              <input className="input-field flex-1" value={localDevDir} onChange={(e) => setLocalDevDir(e.target.value)} />
-              <button className="btn-ghost px-3 flex items-center gap-1.5" onClick={() => handleBrowse('devStackDir')}>
-                <FolderSearch size={14} /> {t('browse')}
-              </button>
-            </div>
-            <span className="text-[11px] text-muted">{t('devStackDirDesc')}</span>
-          </div>
-
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between gap-3">
             <div>
               <div className="text-[13px] font-semibold">{t('startOnBoot')}</div>
               <div className="text-[11px] text-muted">{t('startOnBootDesc')}</div>
             </div>
             <Toggle active={settings.startOnBoot} onToggle={() => toggleSetting('startOnBoot')} label={t('startOnBoot')} />
           </div>
+        </Section>
 
-          <div className="flex flex-col gap-1.5 border-t border-border pt-4">
-            <label className="text-[13px] font-semibold text-textDim">{t('defaultEditor')}</label>
-            <div className="flex gap-2">
-              <input
-                className="input-field flex-1"
-                value={settings.editorPath}
-                placeholder={t('defaultEditorPlaceholder')}
-                onChange={(e) => updateSetting('editorPath', e.target.value)}
-              />
-              <button
-                className="btn-ghost px-3 flex items-center gap-1.5"
-                onClick={browseForEditor}
-              >
-                <FolderSearch size={14} /> {t('browse')}
-              </button>
+        <Section
+          title={t('appUpdates')}
+          action={(
+            <button type="button" className="btn-ghost flex items-center gap-2 shrink-0" onClick={() => checkAppUpdate(false)} disabled={appUpdate.status === 'checking'}>
+              <RefreshCw size={14} className={appUpdate.status === 'checking' ? 'animate-spin' : ''} /> {t('checkForUpdates')}
+            </button>
+          )}
+        >
+          <div className="flex items-center gap-x-6 gap-y-2 flex-wrap">
+            <div className="text-[13px]">
+              <span className="text-muted">{t('currentVersion')}:</span> <span className="font-bold">{appUpdate.currentVersion || '—'}</span>
             </div>
-            <span className="text-[11px] text-muted">{t('defaultEditorDesc')}</span>
+            <div className="text-[13px]">
+              <span className="text-muted">{t('latestVersion')}:</span> <span className="font-bold">{appUpdate.latestVersion || '—'}</span>
+            </div>
+            <div className={`tag bg-transparent ${updateStatusTone[appUpdate.status] || updateStatusTone.idle}`}>{updateStatusLabel}</div>
           </div>
-        </div>
+          {appUpdate.lastCheckedAt && (
+            <div className="text-[11px] text-muted -mt-2">{t('lastChecked')}: {new Date(appUpdate.lastCheckedAt).toLocaleString()}</div>
+          )}
 
-        <div className="bg-surface border border-border rounded-xl p-5 flex flex-col gap-4">
-          <div className="flex items-center justify-between border-b border-border pb-3">
+          {installLabel && (
+            <div className="flex flex-col gap-2">
+              <div className="text-[12px] text-textDim">{installLabel}</div>
+              {appUpdate.installStatus === 'downloading' && (
+                <div className="bar-bg"><div className="bar-fill" style={{ width: `${installProgressPct}%` }} /></div>
+              )}
+            </div>
+          )}
+
+          {appUpdate.error && (
+            <div className="text-[12px] text-danger bg-[#ff4d6d12] border border-[#ff4d6d33] rounded-lg p-3">{appUpdate.error}</div>
+          )}
+
+          {appUpdate.available && (
+            <div className="flex items-center gap-2">
+              {appUpdate.canInstall ? (
+                <button type="button" className="btn-primary flex items-center gap-2" onClick={installAppUpdate} disabled={appUpdate.installStatus === 'downloading' || appUpdate.installStatus === 'installing'}>
+                  <Download size={14} /> {t('installUpdateTo', { version: appUpdate.latestVersion })}
+                </button>
+              ) : (
+                <button type="button" className="btn-primary flex items-center gap-2" onClick={openAppUpdateUrl} disabled={!appUpdate.downloadUrl && !appUpdate.htmlUrl}>
+                  <Download size={14} /> {appUpdate.downloadUrl ? t('downloadUpdate') : t('openReleasePage')}
+                </button>
+              )}
+            </div>
+          )}
+
+          {releaseNotes && (
+            <details className="text-[12px]">
+              <summary className="cursor-pointer text-textDim">{t('releaseNotes')}</summary>
+              <div className="mt-2 text-textDim whitespace-pre-wrap max-h-44 overflow-y-auto leading-relaxed bg-panel/50 border border-border rounded-lg p-3">
+                {releaseNotes}
+              </div>
+            </details>
+          )}
+        </Section>
+
+        <details className="bg-surface border border-border rounded-xl p-5 group">
+          <summary className="cursor-pointer text-[11px] font-bold text-muted tracking-[0.08em] uppercase">{t('advancedSection')}</summary>
+          <div className="flex items-center justify-between gap-3 mt-4">
             <div>
-              <div className="text-[11px] font-bold text-muted tracking-[0.08em] uppercase">{t('appUpdates')}</div>
-              <div className="text-[11px] text-muted mt-1">{t('appUpdatesDesc')}</div>
+              <div className="text-[13px] font-semibold">{t('inspect')}</div>
+              <div className="text-[11px] text-muted">{t('inspectDesc')}</div>
             </div>
-            <button className="btn-ghost flex items-center gap-2" onClick={() => checkAppUpdate(false)}>
-              <RefreshCw size={14} /> {t('checkForUpdates')}
+            <button type="button" className="btn-ghost flex items-center gap-2 shrink-0" onClick={handleOpenInspector}>
+              <Bug size={14} /> {t('open')}
             </button>
           </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <div className="bg-panel/50 border border-border rounded-2xl p-4">
-              <div className="text-[11px] text-muted uppercase tracking-[0.08em]">{t('currentVersion')}</div>
-              <div className="text-[18px] font-extrabold mt-2">{appUpdate.currentVersion || '—'}</div>
-            </div>
-            <div className="bg-panel/50 border border-border rounded-2xl p-4">
-              <div className="text-[11px] text-muted uppercase tracking-[0.08em]">{t('latestVersion')}</div>
-              <div className="text-[18px] font-extrabold mt-2">{appUpdate.latestVersion || '—'}</div>
-            </div>
-          </div>
-
-          <div className="flex items-center justify-between gap-3 flex-wrap">
-            <div className={`tag bg-transparent ${updateStatusTone[appUpdate.status] || updateStatusTone.idle}`}>
-              {updateStatusLabel}
-            </div>
-            {appUpdate.lastCheckedAt ? (
-              <div className="text-[11px] text-muted">
-                {t('lastChecked')}: {new Date(appUpdate.lastCheckedAt).toLocaleString()}
-              </div>
-            ) : null}
-          </div>
-
-          {publishedAtLabel ? (
-            <div className="text-[12px] text-textDim">
-              {t('releasePublished')}: {publishedAtLabel}
-            </div>
-          ) : null}
-
-          {appUpdate.assetName ? (
-            <div className="text-[12px] text-textDim">
-              {t('updateAsset')}: <span className="font-mono text-text">{appUpdate.assetName}</span>
-            </div>
-          ) : null}
-
-          <div className="text-[12px] text-textDim">
-            {t('updateMode')}: {appUpdate.canInstall ? t('updateModeNative') : t('updateModeManual')}
-          </div>
-
-          {!appUpdate.nativeConfigured ? (
-            <div className="text-[12px] text-warn bg-[#f5a62312] border border-[#f5a62333] rounded-2xl p-3">
-              {t('updateNativeSetupHint')}
-            </div>
-          ) : null}
-
-          {appUpdate.installStatus !== 'idle' ? (
-            <div className="bg-panel/50 border border-border rounded-2xl p-4">
-              <div className="flex items-center justify-between gap-3">
-                <div className="text-[12px] text-textDim">{t('updateInstallStatus')}</div>
-                <div className="text-[12px] font-semibold text-text">
-                  {appUpdate.installStatus === 'downloading' ? `${t('updateDownloading')} ${installProgressPct}%` :
-                    appUpdate.installStatus === 'installing' ? t('updateInstalling') :
-                      appUpdate.installStatus === 'installed' ? t('updateInstalled') :
-                        appUpdate.installStatus === 'error' ? t('updateInstallError') : '—'}
-                </div>
-              </div>
-              {appUpdate.installStatus === 'downloading' ? (
-                <div className="mt-3">
-                  <div className="bar-bg">
-                    <div className="bar-fill" style={{ width: `${installProgressPct}%` }} />
-                  </div>
-                </div>
-              ) : null}
-            </div>
-          ) : null}
-
-          {formattedReleaseNotes ? (
-            <div className="bg-panel/50 border border-border rounded-2xl p-4">
-              <div className="text-[11px] text-muted uppercase tracking-[0.08em] mb-2">{t('releaseNotes')}</div>
-              <div className="text-[12px] text-textDim whitespace-pre-wrap max-h-44 overflow-y-auto leading-relaxed">
-                {formattedReleaseNotes}
-              </div>
-            </div>
-          ) : null}
-
-          {appUpdate.error ? (
-            <div className="text-[12px] text-danger bg-[#ff4d6d12] border border-[#ff4d6d33] rounded-2xl p-3">
-              {appUpdate.error}
-            </div>
-          ) : null}
-
-          <div className="flex items-center gap-2">
-            {appUpdate.available && appUpdate.canInstall ? (
-              <button className="btn-primary flex items-center gap-2" onClick={installAppUpdate}>
-                <Download size={14} /> {t('installUpdate')}
-              </button>
-            ) : null}
-            <button
-              className="btn-ghost flex items-center gap-2"
-              onClick={openAppUpdateUrl}
-              disabled={!appUpdate.downloadUrl && !appUpdate.htmlUrl}
-            >
-              <Download size={14} /> {appUpdate.downloadUrl ? t('downloadUpdate') : t('openReleasePage')}
-            </button>
-          </div>
-        </div>
-
-        {/* Ports */}
-        <div className="bg-surface border border-border rounded-xl p-5 flex flex-col gap-4">
-          <div className="text-[11px] font-bold text-muted tracking-[0.08em] uppercase border-b border-border pb-3">{t('ports')}</div>
-          {/* Ports are changed in one place, the Services rows, which validate and apply them
-              (vhosts, my.ini, restart). Typing here used to change the next start silently. */}
-          <div className="grid grid-cols-2 gap-3">
-            <div className="flex flex-col gap-1.5">
-              <label htmlFor="settings-port80" className="text-[13px] font-semibold text-textDim">{t('httpPort')}</label>
-              <input id="settings-port80" className="input-field" value={settings.port80 || 80} readOnly />
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <label htmlFor="settings-portmysql" className="text-[13px] font-semibold text-textDim">{t('mysqlPort')}</label>
-              <input id="settings-portmysql" className="input-field" value={settings.portMySQL || 3306} readOnly />
-            </div>
-          </div>
-          <button type="button" className="text-[12px] text-accent hover:underline self-start" onClick={() => useStore.getState().setActivePage('services')}>
-            {t('changePortsOnServices')}
-          </button>
-          <button className="btn-primary self-start mt-2" onClick={handleApplyChanges}>
-            {t('saveChanges')}
-          </button>
-        </div>
+          {!appUpdate.nativeConfigured && (
+            <div className="text-[11px] text-muted mt-3">{t('updateNativeSetupHint')}</div>
+          )}
+        </details>
       </div>
     </div>
   );

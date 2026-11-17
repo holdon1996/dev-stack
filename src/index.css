@@ -112,6 +112,12 @@
     box-shadow: 0 8px 24px rgba(255, 77, 109, 0.2);
   }
 
+  /* After the :hover rules (same specificity): disabled buttons stay dimmed and do not lift. */
+  .btn-primary:disabled, .btn-ghost:disabled, .btn-danger:disabled {
+    @apply opacity-50 cursor-not-allowed translate-y-0 scale-100;
+    box-shadow: none;
+  }
+
   .nav-item {
     @apply flex items-center gap-3 px-4 py-3 rounded-2xl cursor-pointer text-[13px] font-semibold text-textDim transition-all duration-300 ease-out border border-transparent;
   }

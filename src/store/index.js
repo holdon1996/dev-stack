@@ -81,6 +81,11 @@ export const useStore = create(
             }),
             onRehydrateStorage: () => (state) => {
                 if (state) {
+                    // Settings from before the split had one editor for both: freeze it as the
+                    // config editor so picking a project IDE later does not change it.
+                    if (state.settings && state.settings.configEditorPath === undefined) {
+                        state.settings.configEditorPath = state.settings.editorPath || '';
+                    }
                     // Restore installed/active status back onto the fresh default list
                     if (state.phpInstalledVersions?.length) {
                         state.phpVersions = mergePersistedVersions(state.phpVersions, state.phpInstalledVersions);

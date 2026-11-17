@@ -172,7 +172,7 @@ const PageSites = () => {
         <div className="bg-surface border border-border rounded-xl overflow-hidden">
           <div className="px-4.5 py-3.5 border-b border-border grid grid-cols-[2fr_90px_150px_2fr_70px_auto] gap-3 text-[11px] text-muted font-bold tracking-widest uppercase bg-surface">
             <span>{t('domain')}</span>
-            <span>{t('siteType')}</span>
+            <span>{t('siteTypeColumn')}</span>
             <span>PHP</span>
             <span>{t('rootPath')}</span>
             <span>{t('processesShort')}</span>

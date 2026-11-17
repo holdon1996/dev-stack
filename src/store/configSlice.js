@@ -155,7 +155,7 @@ export const createConfigSlice = (set, get) => ({
         }
     },
 
-    browseForEditor: async () => {
+    browseForEditor: async (key = 'editorPath') => {
         try {
             const { open } = await import('@tauri-apps/plugin-dialog');
             const selected = await open({
@@ -163,7 +163,7 @@ export const createConfigSlice = (set, get) => ({
                 filters: [{ name: 'Executable', extensions: ['exe'] }]
             });
             if (selected) {
-                get().updateSetting('editorPath', selected);
+                get().updateSetting(key, selected);
             }
         } catch (e) { console.error('browseForEditor failed', e); }
     },
@@ -230,7 +230,7 @@ export const createConfigSlice = (set, get) => ({
             }
 
             const winPath = path.replace(/\//g, '\\');
-            const editor = get().settings.editorPath || null;
+            const editor = get().settings.configEditorPath || null;
             const isAdmin = id === 'hosts';
 
             if (forceEditor) {
