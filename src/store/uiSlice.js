@@ -66,28 +66,6 @@ export const createUiSlice = (set, get) => ({
     projectLogSite: '',
     openProjectLogs: (siteKey) => set({ projectLogSite: siteKey, activePage: 'logs' }),
 
-    /** Opens a project folder (Projects page) with the editor chosen in Settings. */
-    openInEditor: async (path) => {
-        const { settings, t, showToast } = get();
-        if (!settings.editorPath) {
-            showToast(t('editorNotSet'), 'info', { action: { label: t('settings'), page: 'settings' } });
-            return;
-        }
-        const { folderOpenArgs } = await import('../lib/editors');
-        const args = folderOpenArgs(settings.editorPath, path.replace(/\//g, '\\'));
-        if (!args) {
-            showToast(t('editorNoFolders'), 'info', { action: { label: t('settings'), page: 'settings' } });
-            return;
-        }
-        try {
-            const { invoke } = await import('@tauri-apps/api/core');
-            const ok = await invoke('start_detached_process', { executable: settings.editorPath, args, cwd: null });
-            if (!ok) throw settings.editorPath;
-        } catch (e) {
-            showToast(t('editorOpenFailed', { error: `${e}` }), 'danger', { action: { label: t('settings'), page: 'settings' } });
-        }
-    },
-
     /** Editors installed in their usual folders, for one-click picking in Settings. */
     detectEditors: async () => {
         try {

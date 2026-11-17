@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useStore } from '../store';
-import { ExternalLink, Folder, Trash2, Lock, Link, Unlink, Settings2, Terminal, Play, Square, RotateCcw, AlertTriangle, Code2, ScrollText } from 'lucide-react';
+import { ExternalLink, Folder, Trash2, Lock, Link, Unlink, Settings2, Terminal, Play, Square, RotateCcw, AlertTriangle, ScrollText } from 'lucide-react';
 import SiteConfigModal from './SiteConfigModal';
 import ProjectManifestCard from './ProjectManifestCard';
 import { siteProcesses } from '../lib/sites';
@@ -252,9 +252,6 @@ const PageSites = () => {
                     ))}
                     <button type="button" className="btn-ghost p-1.5" title={t('siteSettings')} aria-label={t('siteSettings')} onClick={() => setEditing(site)}>
                       <Settings2 size={14} />
-                    </button>
-                    <button type="button" className="btn-ghost p-1.5" title={t('openInEditor')} aria-label={t('openInEditor')} onClick={() => useStore.getState().openInEditor(site.path)}>
-                      <Code2 size={14} />
                     </button>
                     {managed && (
                       <button type="button" className="btn-ghost p-1.5" title={t('projectLogs')} aria-label={t('projectLogs')} onClick={() => useStore.getState().openProjectLogs(site.key)}>

@@ -33,19 +33,3 @@ export const firstPerEditor = (found) => {
     const seen = new Set();
     return found.filter(e => !seen.has(e.name) && seen.add(e.name));
 };
-
-/**
- * How to open a project folder with an editor.
- * File editors open every file under a folder argument (Notepad++ asked about 161k files
- * from node_modules/vendor), so Notepad++ gets its workspace flag and Notepad is refused.
- */
-export const folderOpenArgs = (editorPath, folder) => {
-    const exe = editorPath.split(/[\\/]/).pop().toLowerCase();
-    if (exe === 'notepad.exe' || exe === 'wordpad.exe') return null;
-    // -multiInst: a running single-instance Notepad++ (often elevated) receives the
-    // folder but drops the workspace flag, so nothing opens; a new window handles it.
-    // -nosession keeps that window from reopening (and later overwriting) the saved tabs.
-    if (exe === 'notepad++.exe') return ['-multiInst', '-nosession', '-openFoldersAsWorkspace', folder];
-    return [folder];
-};
-

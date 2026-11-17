@@ -83,7 +83,7 @@ const PageDatabase = () => {
               className="flex items-center gap-2 bg-surface border border-border rounded-lg px-2.5 py-1.5 cursor-pointer hover:bg-surface/80 transition-colors shrink-0"
               title={`${svc.name} - Port: ${svc.port}`}
             >
-              <div className={`w-1.5 h-1.5 rounded-full ${svc.id < 1000 ? 'bg-accent' : 'bg-orange-500'} animate-pulse`} />
+              <div className={`w-1.5 h-1.5 rounded-full ${svc.id < 1000 ? 'bg-accent' : 'bg-orange-500'}`} />
               <div className="flex flex-col">
                 <div className="text-[11px] text-muted font-bold uppercase tracking-wider leading-none mb-0.5">
                   {(svc.name || 'MySQL').replace('(DevStack)', '').trim()}

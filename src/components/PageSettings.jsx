@@ -183,16 +183,6 @@ const PageSettings = () => {
 
         <Section title={t('editorsSection')}>
           <EditorField
-            id="settings-project-editor"
-            label={t('projectEditor')}
-            desc={t('projectEditorDesc')}
-            value={settings.editorPath || ''}
-            placeholder={t('defaultEditorPlaceholder')}
-            onChange={(v) => updateSetting('editorPath', v)}
-            onBrowse={() => browseForEditor('editorPath')}
-            found={found}
-          />
-          <EditorField
             id="settings-config-editor"
             label={t('configEditor')}
             desc={t('configEditorDesc')}

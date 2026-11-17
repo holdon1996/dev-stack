@@ -52,7 +52,7 @@ const PageApache = () => {
         <div className="flex items-center gap-3">
           {activeApache && (
             <div className="flex items-center gap-2 bg-surface border border-border rounded-lg px-3 py-2">
-              <div className={`w-2 h-2 rounded-full ${isApacheRunning ? 'bg-accent animate-pulse' : 'bg-muted'}`} />
+              <div className={`w-2 h-2 rounded-full ${isApacheRunning ? 'bg-accent' : 'bg-muted'}`} />
               <div className="flex flex-col">
                 <span className="text-[11px] text-muted font-bold tracking-wider uppercase">
                   {isApacheRunning ? t('runningState') : t('activeState')}

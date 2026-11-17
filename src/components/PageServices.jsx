@@ -148,7 +148,7 @@ const ServiceRow = ({ service }) => {
         )}
         {service.portConflict && !owner && !service.useExternal && (
           <div className="flex items-center gap-2 mt-1 bg-red-500/10 px-1.5 py-0.5 rounded border border-red-500/20 animate-in fade-in zoom-in duration-200">
-            <span className="text-[11px] text-red-500 font-bold animate-pulse uppercase tracking-tighter">{useStore.getState().t('portBusy')}</span>
+            <span className="text-[11px] text-red-500 font-bold uppercase tracking-tighter">{useStore.getState().t('portBusy')}</span>
             <button
               className="text-[11px] bg-red-500 text-white px-1 rounded hover:brightness-110 active:scale-95 transition-all font-bold uppercase"
               onClick={(e) => { e.stopPropagation(); useStore.getState().killPort(service.port); }}

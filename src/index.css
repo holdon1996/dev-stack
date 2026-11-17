@@ -53,8 +53,9 @@
 
   .dot-running {
     @apply bg-accent;
+    /* Static on purpose: an endless pulse per running service kept WebView2 repainting
+       every frame while the app sat idle, which slowed the whole PC. */
     box-shadow: 0 0 6px rgba(0, 229, 160, 0.5);
-    animation: pulse 3s ease-in-out infinite;
   }
 
   .dot-stopped {
@@ -284,26 +285,6 @@
     @apply relative overflow-hidden;
   }
 
-  .shine::after {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: -100%;
-    width: 60%;
-    height: 100%;
-    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.03), transparent);
-    animation: shine 4s ease-in-out infinite;
-  }
-
-  @keyframes shine {
-    0% {
-      left: -100%;
-    }
-
-    100% {
-      left: 200%;
-    }
-  }
 }
 
 @layer utilities {
